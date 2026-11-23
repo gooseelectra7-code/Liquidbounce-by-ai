@@ -411,7 +411,6 @@ private fun ModuleAutoCart.xbowStart(rail: BlockPos) {
     val slab = findSlabCell(rail) ?: return debug(
         "no slab cell between you and the rail — step back so there is a free block in between"
     )
-    if (!isLookingAt(rail)) return debug("not looking at the rail")
     // Checked before the cart goes down: finding this out at the slab step wastes a minecart.
     if (!isBottomSlab(slab) && findSlabSlot(mergingSlabBlock(slab.below())) == -1) {
         return debug("only slab in the hotbar would merge with the one below ${slab.toShortString()}")
@@ -471,14 +470,6 @@ private fun ModuleAutoCart.findSlabCell(rail: BlockPos): BlockPos? {
     return cell
 }
 
-private fun ModuleAutoCart.isLookingAt(rail: BlockPos): Boolean {
-    val toRail = Vec3.atCenterOf(rail).subtract(player.eyePosition)
-    if (toRail.lengthSqr() < 1.0E-6) return false
-    return player.lookAngle.dot(toRail.normalize()) >= LOOK_DOT_MIN
-}
-
-private const val LOOK_DOT_MIN = 0.45
-
 private fun ModuleAutoCart.canPlaceLavaAt(slab: BlockPos): Boolean {
     if (hasLava(slab)) return true
     val above = world.getBlockState(slab.above())
@@ -506,21 +497,8 @@ private fun shotLineValid(): Boolean {
     return reachesUnobstructed(origin, entry)
 }
 
-/** A TNT minecart is 0.98 wide and 0.7 tall and rides a hair above the rail cell's floor. */
-private const val CART_HALF_WIDTH = 0.55
-private const val CART_BOX_HEIGHT = 0.85
-
-/**
- * Where the cart WILL be before its spawn packet arrives: the real entity footprint centred on the
- * rail, not a whole inflated cell — an oversized box validates lines that miss the actual cart.
- */
-private fun estimatedCartBox(rail: BlockPos): AABB = AABB(
-    rail.x + 0.5 - CART_HALF_WIDTH, rail.y.toDouble(), rail.z + 0.5 - CART_HALF_WIDTH,
-    rail.x + 0.5 + CART_HALF_WIDTH, rail.y + CART_BOX_HEIGHT, rail.z + 0.5 + CART_HALF_WIDTH
-)
-
 private fun cartBox(rail: BlockPos): AABB =
-    findCart(rail)?.boundingBox?.inflate(0.12) ?: estimatedCartBox(rail)
+    findCart(rail)?.boundingBox?.inflate(0.12) ?: estimatedTntMinecartBox(rail)
 
 /**
  * Walks candidate heights down the cart looking for a line that clears the slab's solid half,
@@ -600,7 +578,7 @@ private fun hasShootingLine(rail: BlockPos, slab: BlockPos): Boolean {
     val origin = boltOrigin()
     // The estimate the cart will actually occupy — an inflated whole cell here would arm traps
     // whose only "line" misses the real cart, and the failure would surface four items later.
-    val cartBox = estimatedCartBox(rail)
+    val cartBox = estimatedTntMinecartBox(rail)
     val slabSolid = AABB(
         slab.x.toDouble(), slab.y.toDouble(), slab.z.toDouble(), slab.x + 1.0, slab.y + 0.5, slab.z + 1.0
     )

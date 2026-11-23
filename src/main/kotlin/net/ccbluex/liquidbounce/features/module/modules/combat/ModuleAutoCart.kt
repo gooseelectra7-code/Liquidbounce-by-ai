@@ -63,21 +63,21 @@ import net.minecraft.world.phys.Vec3
 /**
  * AutoCart module
  *
- * Fire a Flame arrow into the sky with a short draw, and the module places a rail and a TNT
- * minecart where that arrow is going to land — the arrow comes down onto the cart and sets it off.
+ * Fire a Flame arrow, and the module searches near its first block impact for a rail cell that can
+ * host a TNT minecart intersecting the simulated arrow path. Unsupported impact surfaces can
+ * therefore use a nearby valid surface, but the module does not accept a spot the arrow would miss.
  *
  * The trigger is the *release* of the shot, detected on the outgoing `RELEASE_USE_ITEM` action
  * while a bow is drawn. At that instant the arrow's flight is simulated with vanilla ballistics
  * (speed from the draw charge, drag 0.99/tick, gravity 0.05/tick) and the first block it clips is
- * the landing site. A short draw is what makes the combo work at all: a lobbed arrow lands a few
- * blocks away — inside placement reach — and its long hang time pays for the whole placement
- * sequence many times over.
+ * the landing site. The landing must be inside placement reach and give the module enough time to
+ * place the rail and cart before the arrow arrives.
  *
  * Placement then runs as a small per-tick state machine: aim at the landing point (silent STRICT
- * rotation, so the visible camera stays on the sky shot), place the rail against the face the
+ * rotation, so the visible camera stays on the original shot), place the rail against the face the
  * arrow will strike, place the TNT cart on that rail, hand the hotbar slot back. Placements are
  * synthesized [BlockHitResult]s through `interaction.useItemOn` — the same idiom AutoCrystal uses —
- * because the crosshair is, by construction, pointing at the sky.
+ * independently of the direction of the original shot.
  */
 @Suppress("TooManyFunctions")
 object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
@@ -137,15 +137,10 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
     private val flameOnly by boolean("FlameOnly", true)
 
     /**
-     * Largest draw (in ticks) that still counts as the deliberate short lob. Below 3 ticks vanilla
+     * Largest draw (in ticks) accepted for an automatic placement sequence. Below 3 ticks vanilla
      * does not fire an arrow at all (charge < 0.1), so the effective window is 3..this.
      */
     private val maxDraw by int("MaxDraw", 10, 3..20, "ticks")
-
-    /**
-     * How far above the horizon the shot must point to count as "into the sky".
-     */
-    private val minPitch by float("MinPitch", 30f, 0f..90f, "°")
 
     /**
      * Degrees the server-side rotation may still be off the placement point before we place
@@ -155,7 +150,7 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
     private val rotationTolerance by float("RotationTolerance", 15f, 1f..90f, "°")
 
     /**
-     * Read the landing off the arrow the SERVER made, instead of predicting it from the shot.
+     * Read the impact path off the arrow the SERVER made, instead of predicting it from the shot.
      *
      * The prediction cannot be exact, and not because the physics are hard — because the bow is not
      * deterministic. It fires with `inaccuracy = 1.0`, and `Projectile.getMovementToShoot` adds
@@ -166,8 +161,9 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
      * exactly the "sometimes it breaks" failure.
      *
      * So instead of guessing, the module waits for the arrow's spawn packet, which carries the real
-     * post-roll velocity, and simulates from that. The cost is the round trip; a lobbed arrow hangs
-     * for sixty ticks or more, so a few of them are affordable — the mode is built on that hang time
+     * post-roll velocity, and simulates its full path from that. The nearby rail search only accepts
+     * a cart envelope that this path crosses. The cost is the round trip; a lobbed arrow hangs for
+     * sixty ticks or more, so a few of them are affordable — the mode is built on that hang time
      * paying for the placement sequence many times over.
      *
      * Off falls back to predicting at release, which is faster but scatters.
@@ -177,6 +173,15 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
     private val cooldown = Chronometer()
 
     private enum class Phase { IDLE, PLACE_RAIL, PLACE_CART, RESTORE }
+
+    private data class ArrowPathSegment(val start: Vec3, val end: Vec3)
+    private data class ArrowFlight(val hit: BlockHitResult, val segments: List<ArrowPathSegment>)
+    private data class RailCandidate(
+        val cell: BlockPos,
+        val placementHit: BlockHitResult,
+        val flightProgress: Double,
+        val impactDistanceSquared: Double
+    )
 
     private var phase = Phase.IDLE
     private var landing: BlockHitResult? = null
@@ -223,38 +228,91 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
         pendingArrowFlight = spawn to Vec3(packet.movement.x, packet.movement.y, packet.movement.z)
     }
 
-    private fun beginPlacement(hit: BlockHitResult) {
-        // Out of placement reach — a flat shot, or a lob over a cliff. Self-gates the "sky" intent:
-        // only a genuinely lobbed arrow comes down close enough.
-        if (hit.location.distanceTo(player.eyePosition) > player.blockInteractionRange()) {
-            return
-        }
-
-        val cell = hit.blockPos.relative(hit.direction)
-
-        // The rail must be able to exist there: a free cell over a sturdy top face (that is what
-        // BaseRailBlock's survival check wants), or a rail left from a previous run. An arrow that
-        // clipped a wall face or an overhang otherwise starts a sequence that can only time out
-        // with the hotbar stolen.
-        val cellState = world.getBlockState(cell)
-        val support = cell.below()
-        val canHostRail = cellState.block is BaseRailBlock ||
-            (cellState.canBeReplaced() && world.getBlockState(support).isFaceSturdy(world, support, Direction.UP))
-        if (!canHostRail) {
-            return
-        }
+    private fun beginPlacement(flight: ArrowFlight) {
+        // The impact cell may be a wall, ceiling, or otherwise unsupported. Search nearby, but
+        // only accept rail cells whose cart envelope is crossed by this same simulated arrow path.
+        val candidate = findRailCandidate(flight) ?: return
 
         // Both items confirmed before the silent aim starts — finding out mid-sequence wastes it.
         if (findHotbarSlot { isRail(it) } == null || findHotbarSlot { it.`is`(Items.TNT_MINECART) } == null) {
             return
         }
 
-        landing = hit
-        railCell = cell
+        landing = candidate.placementHit
+        railCell = candidate.cell
         originalSlot = player.inventory.selectedSlot
         phase = Phase.PLACE_RAIL
         phaseTicks = 0
         sequenceTicks = 0
+    }
+
+    private fun findRailCandidate(flight: ArrowFlight): RailCandidate? {
+        val impactCell = flight.hit.blockPos.relative(flight.hit.direction)
+        val lastSegmentIndex = flight.segments.lastIndex
+        var best: RailCandidate? = null
+
+        // Search only a small neighbourhood and prefer the latest crossing before the original
+        // impact, keeping the trap close to the intended landing while requiring a real path overlap.
+        for (dx in -RAIL_SEARCH_RADIUS..RAIL_SEARCH_RADIUS) {
+            for (dy in -RAIL_SEARCH_RADIUS..RAIL_SEARCH_RADIUS) {
+                for (dz in -RAIL_SEARCH_RADIUS..RAIL_SEARCH_RADIUS) {
+                    val cell = impactCell.offset(dx, dy, dz)
+                    val state = world.getBlockState(cell)
+                    val support = cell.below()
+                    val canHostRail = state.block is BaseRailBlock ||
+                        (state.canBeReplaced() &&
+                            world.getBlockState(support).isFaceSturdy(world, support, Direction.UP))
+                    if (!canHostRail || !withinReach(cell) || !withinReach(support)) {
+                        continue
+                    }
+
+                    val cartBox = estimatedTntMinecartBox(cell)
+                    var crossing: Pair<Int, Vec3>? = null
+                    for ((index, segment) in flight.segments.withIndex()) {
+                        val point = cartBox.clip(segment.start, segment.end).orElse(null) ?: continue
+                        // The final point is the solid-block impact. A box that only meets the
+                        // trajectory at that endpoint is not evidence that the cart gets hit first.
+                        if (index == lastSegmentIndex &&
+                            point.distanceToSqr(segment.end) <= IMPACT_ENDPOINT_EPSILON_SQUARED
+                        ) {
+                            continue
+                        }
+                        crossing = index to point
+                        break
+                    }
+                    val (segmentIndex, crossingPoint) = crossing ?: continue
+
+                    val segment = flight.segments[segmentIndex]
+                    val segmentLength = segment.start.distanceTo(segment.end)
+                    val segmentProgress = if (segmentLength <= 1.0e-9) 0.0 else {
+                        segment.start.distanceTo(crossingPoint) / segmentLength
+                    }
+                    val candidate = RailCandidate(
+                        cell = cell,
+                        placementHit = railPlacementHit(cell),
+                        flightProgress = segmentIndex + segmentProgress,
+                        impactDistanceSquared = crossingPoint.distanceToSqr(flight.hit.location)
+                    )
+                    val previous = best
+                    if (previous == null ||
+                        candidate.flightProgress > previous.flightProgress ||
+                        (candidate.flightProgress == previous.flightProgress &&
+                            candidate.impactDistanceSquared < previous.impactDistanceSquared)
+                    ) {
+                        best = candidate
+                    }
+                }
+            }
+        }
+
+        return best
+    }
+
+    /** A vanilla-shaped top-face click for placing a rail in [cell] from its sturdy support. */
+    private fun railPlacementHit(cell: BlockPos): BlockHitResult {
+        val support = cell.below()
+        val location = Vec3(cell.x + 0.5, cell.y.toDouble(), cell.z + 0.5)
+        return BlockHitResult(location, Direction.UP, support, false)
     }
 
     /**
@@ -295,8 +353,7 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
         // No arrow, no shot: vanilla sends the release packet regardless, but nothing will fly.
         if (player.getProjectile(bow).isEmpty) return@handler
 
-        // Skyward, short draw. The charge floor is vanilla's own — below 0.1 the bow does not fire.
-        if (player.xRot > -minPitch) return@handler
+        // The charge floor is vanilla's own — below 0.1 the bow does not fire.
         val charge = drawCharge(player.ticksUsingItem)
         if (player.ticksUsingItem > maxDraw || charge < MIN_FIRE_CHARGE) return@handler
 
@@ -308,8 +365,8 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
             return@handler
         }
 
-        val hit = simulateArrowLanding(charge * ARROW_SPEED_PER_CHARGE) ?: return@handler
-        beginPlacement(hit)
+        val flight = simulateArrowLanding(charge * ARROW_SPEED_PER_CHARGE) ?: return@handler
+        beginPlacement(flight)
     }
 
     /**
@@ -513,7 +570,8 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
     }
 
     /**
-     * Flies the arrow the server is about to spawn and returns the first block it strikes.
+     * Flies the arrow the server is about to spawn and returns its path through the first block it
+     * strikes.
      *
      * Vanilla per tick: clip the segment `pos → pos + velocity`, then move, then apply drag 0.99
      * and gravity 0.05. Spawn is at eye height minus 0.1, direction is the exact look vector, and
@@ -521,7 +579,7 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
      * out of `AbstractArrow` / `Projectile.shootFromRotation`. Divergence is ignored: at 1.0 it is
      * fractions of a degree, far below the size of a block face.
      */
-    private fun simulateArrowLanding(speed: Float): BlockHitResult? = simulateArrowFrom(
+    private fun simulateArrowLanding(speed: Float): ArrowFlight? = simulateArrowFrom(
         player.eyePosition.subtract(0.0, ARROW_SPAWN_EYE_OFFSET, 0.0),
         Vec3(player.lookAngle.x, player.lookAngle.y, player.lookAngle.z)
             .normalize()
@@ -534,12 +592,13 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
     )
 
     /**
-     * Flies an arrow from a known start and returns the first block it strikes. Vanilla per tick:
-     * clip the segment, move, then drag 0.99 and gravity 0.05 — in that order.
+     * Flies an arrow from a known start and returns its path through the first block it strikes.
+     * Vanilla per tick: clip the segment, move, then drag 0.99 and gravity 0.05 — in that order.
      */
-    private fun simulateArrowFrom(start: Vec3, initialVelocity: Vec3): BlockHitResult? {
+    private fun simulateArrowFrom(start: Vec3, initialVelocity: Vec3): ArrowFlight? {
         var pos = start
         var velocity = initialVelocity
+        val segments = ArrayList<ArrowPathSegment>(MAX_SIMULATION_TICKS)
 
         repeat(MAX_SIMULATION_TICKS) {
             val next = pos.add(velocity)
@@ -548,9 +607,11 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
                 ClipContext(pos, next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player)
             )
             if (hit.type == HitResult.Type.BLOCK) {
-                return hit
+                segments += ArrowPathSegment(pos, hit.location)
+                return ArrowFlight(hit, segments)
             }
 
+            segments += ArrowPathSegment(pos, next)
             pos = next
             velocity = velocity.scale(ARROW_DRAG).subtract(0.0, ARROW_GRAVITY, 0.0)
         }
@@ -670,6 +731,8 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
     private const val ARROW_DRAG = 0.99
     private const val ARROW_GRAVITY = 0.05
     private const val MAX_SIMULATION_TICKS = 120
+    private const val RAIL_SEARCH_RADIUS = 2
+    private const val IMPACT_ENDPOINT_EPSILON_SQUARED = 1.0e-4
 
     /** Top of the flat rail shape (`Block.box(0, 0, 0, 16, 2, 16)`). */
     private const val RAIL_SURFACE = 0.125
@@ -678,6 +741,19 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
     private const val SEQUENCE_TIMEOUT_TICKS = 30
     private const val HELD_USE_LOCK_TICKS = 4
 }
+
+/** Shared pre-spawn envelope used by SkyShot's path test and Xbow's shooting-line checks. */
+internal fun estimatedTntMinecartBox(rail: BlockPos): AABB = AABB(
+    rail.x + 0.5 - TNT_MINECART_HALF_WIDTH,
+    rail.y.toDouble(),
+    rail.z + 0.5 - TNT_MINECART_HALF_WIDTH,
+    rail.x + 0.5 + TNT_MINECART_HALF_WIDTH,
+    rail.y + TNT_MINECART_BOX_HEIGHT,
+    rail.z + 0.5 + TNT_MINECART_HALF_WIDTH
+)
+
+private const val TNT_MINECART_HALF_WIDTH = 0.55
+private const val TNT_MINECART_BOX_HEIGHT = 0.85
 
 /**
  * Pass-through processor: the placement aim is a two-tick snap onto a fixed point; smoothing it
