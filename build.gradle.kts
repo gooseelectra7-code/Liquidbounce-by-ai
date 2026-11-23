@@ -224,7 +224,7 @@ tasks.withType<JavaCompile>().configureEach {
     // If Javadoc is generated, this must be specified in that task too.
     options.encoding = "UTF-8"
 
-    // Use Java 25 for Minecraft 26.2 compatibility
+    // Use Java 25 for Minecraft 26.1.2 compatibility
     options.release = 25
 }
 
