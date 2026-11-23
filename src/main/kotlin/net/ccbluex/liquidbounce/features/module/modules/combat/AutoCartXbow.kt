@@ -43,10 +43,10 @@ import net.minecraft.world.item.Item
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.Items
 import net.minecraft.world.level.ClipContext
+import net.minecraft.world.level.block.BaseFireBlock
 import net.minecraft.world.level.block.Block
 import net.minecraft.world.level.block.SlabBlock
 import net.minecraft.world.level.block.state.properties.SlabType
-import net.minecraft.world.level.material.Fluids
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.BlockHitResult
 import net.minecraft.world.phys.HitResult
@@ -54,21 +54,21 @@ import net.minecraft.world.phys.Vec3
 import kotlin.math.sqrt
 
 /**
- * Xbow mode of [ModuleAutoCart] — the lava cart bomb.
+ * Xbow mode of [ModuleAutoCart] — the fire cart bomb.
  *
  * You place a rail; the module builds the rest of the trap around it and sets it off: a TNT minecart
- * onto that rail, a slab on the block between you and the cart, a lava source on the slab, then a
- * crossbow bolt threaded THROUGH the lava into the cart. The bolt catches fire crossing the lava,
+ * onto that rail, a slab between you and the cart, fire lit above the slab with flint and steel, then
+ * a crossbow bolt threaded through the fire into the cart. The bolt catches fire crossing the fire,
  * and `MinecartTNT.hurtServer` detonates on a burning `AbstractArrow` *immediately* — no fuse — so
  * the whole cost of the combo is the build.
  *
  * Ported from the `rich` client's `Xbow` (`rich.modules.impl.player.Xbow`): the trap geometry and
- * the aim search that hunts for a line clearing the slab, crossing the lava and still landing on the
+ * the aim search that hunts for a line clearing the slab, crossing the fire and still landing on the
  * cart are kept as they were. Everything about the packet layer was rebuilt.
  *
  * ## Timing
  *
- * One use-item packet per tick, which is the vanilla ceiling. Four are needed (cart, slab, lava,
+ * One interaction packet per tick, which is the vanilla ceiling. Four are needed (cart, slab, fire,
  * shot), so the floor is 4 ticks plus one to notice the rail — and the trap lands in about **6
  * ticks** rather than the ~22 a naive port takes. Two things buy that back:
  *
@@ -91,10 +91,8 @@ import kotlin.math.sqrt
  * ## What the original did that is gone here
  *
  * - *Three interactions in one tick.* Its `placeLava` tried the slab side, the slab top and a plain
- *   use-item back-to-back in one tick. Worse, the first two could never work: [net.minecraft.world.item.BucketItem]
- *   only overrides `use`, not `useOn`, so a bucket click on a block falls through to `Item.useOn` →
- *   PASS. Only the plain use-item ever placed the lava. Here the lava step aims at the slab's top
- *   face and issues exactly that one call — `BucketItem.use` does its own raycast from there.
+ *   use-item back-to-back in one tick. This version uses FlintAndSteelItem's block interaction on
+ *   the slab's top face so fire is placed above the slab with one ordinary `useItemOn` call.
  * - *Hand-rolled slot packets* that desynced from vanilla's tracker and duplicated the announce
  *   (BadPacketsA). Slot changes go through `ensureHasSentCarriedItem`, capped at one per tick.
  * - *Extra flying packets* from its `look(target, true)`. Rotations go through [RotationManager].
@@ -105,7 +103,7 @@ import kotlin.math.sqrt
 
 // ── State ────────────────────────────────────────────────────────────────
 
-internal enum class XbowPhase { CART, SLAB, LAVA, SHOOT, RESTORE }
+internal enum class XbowPhase { CART, SLAB, IGNITE, SHOOT, RESTORE }
 
 private var pendingRail: BlockPos? = null
 private var pendingTicks = 0
@@ -202,7 +200,7 @@ internal fun ModuleAutoCart.xbowTick() {
     when (phase) {
         XbowPhase.CART -> stepCart()
         XbowPhase.SLAB -> stepSlab()
-        XbowPhase.LAVA -> stepLava()
+        XbowPhase.IGNITE -> stepIgnite()
         XbowPhase.SHOOT -> stepShoot()
         // Grim PacketOrderE: the hotbar goes back in its own window, never behind the shot.
         XbowPhase.RESTORE -> xbowFinish()
@@ -243,7 +241,7 @@ private const val RAIL_TOP = 0.0625
 private fun ModuleAutoCart.stepSlab() {
     val slab = slabPos ?: return xbowFinish()
     if (isBottomSlab(slab)) {
-        enterLavaStep()
+        enterIgniteStep()
         return
     }
 
@@ -263,44 +261,45 @@ private fun ModuleAutoCart.stepSlab() {
     if (!swapTo(slot)) return
     useOn(hit)
     debug("slab §f+${elapsed()}t")
-    enterLavaStep()
+    enterIgniteStep()
 }
 
-/**
- * Lava step. [net.minecraft.world.item.BucketItem] does not implement `useOn`, so a block click can
- * never empty it — the only call that works is `use`, and it raycasts from the player's rotation on
- * its own. So all this step has to do is have the wire rotation pointing at the slab's top face.
- */
-private fun ModuleAutoCart.stepLava() {
+/** Light fire in the cell above the bottom slab with a normal block interaction. */
+private fun ModuleAutoCart.stepIgnite() {
     val slab = slabPos ?: return xbowFinish()
-    if (hasLava(slab)) {
+    if (hasFire(slab)) {
         // Nothing was used this tick, so the next aim may still ride out on this tick's flying.
         enterShootStep(pipelineAim = true)
         return
     }
     if (!isBottomSlab(slab)) return retryAim(slabTopAim())
+    if (!canPlaceFireAt(slab)) {
+        debug("fire cannot be placed above ${slab.toShortString()}")
+        return xbowFinish()
+    }
 
     val hit = wireHitOn(slab)
     if (hit == null || hit.direction != Direction.UP) return retryAim(slabTopAim())
     if (!inReach(slab)) return xbowFinish()
 
-    val slot = findHotbarItem(Items.LAVA_BUCKET)
+    val slot = findHotbarItem(Items.FLINT_AND_STEEL)
     if (slot == -1) {
-        debug("no lava bucket in the hotbar any more")
+        debug("no flint and steel in the hotbar any more")
         return xbowFinish()
     }
     if (!swapTo(slot)) return
-    useInAir()
-    debug("lava §f+${elapsed()}t")
+    useOn(hit)
+    debug("fire §f+${elapsed()}t")
+    // Keep this tick's outgoing aim on the clicked slab; the next step can pipeline its shot aim.
     enterShootStep(pipelineAim = false)
 }
 
 private fun ModuleAutoCart.stepShoot() {
     val rail = railPos ?: return xbowFinish()
     val slab = slabPos ?: return xbowFinish()
-    if (!hasLava(slab)) {
+    if (!hasFire(slab)) {
         // No fire, no detonation — rebuild that step rather than waste the bolt.
-        phase = XbowPhase.LAVA
+        phase = XbowPhase.IGNITE
         return
     }
 
@@ -312,7 +311,7 @@ private fun ModuleAutoCart.stepShoot() {
     }
 
     // The functional gate: not "is the angle close to a point" but "does the bolt, fired along the
-    // rotation the server has, clear the slab, cross the lava and land on the cart".
+    // rotation the server has, clear the slab, cross the fire and land on the cart".
     if (!shotLineValid()) {
         val target = shootTarget() ?: return xbowFinish()
         return retryAim(target)
@@ -337,8 +336,8 @@ private fun ModuleAutoCart.enterSlabStep() {
     if (slabPos != null) aimAt(slabSupportAim())
 }
 
-private fun ModuleAutoCart.enterLavaStep() {
-    phase = XbowPhase.LAVA
+private fun ModuleAutoCart.enterIgniteStep() {
+    phase = XbowPhase.IGNITE
     aimTicks = 0
     if (slabPos != null) aimAt(slabTopAim())
 }
@@ -348,12 +347,9 @@ private fun ModuleAutoCart.enterLavaStep() {
  * yaw/pitch carried by a `ServerboundUseItemPacket` against the rotation of that tick. LiquidBounce
  * fills the packet from `RotationManager.currentRotation` at construction time
  * (`MixinServerboundUseItemPacket`), and we build it from `RotationUpdateEvent` — i.e. BEFORE
- * `update()` steps the rotation. So pipelining the next aim in the same tick as a use-item makes the
- * packet carry the old angle while the tick's flying carries the new one, and the two disagree.
- *
- * Block placements are unaffected: the check only looks at `USE_ITEM`, never at
- * `PLAYER_BLOCK_PLACEMENT`. So only the bucket step has to give the pipeline up, and only for the
- * one tick it uses the bucket — costing a single tick on the shot's aim.
+ * `update()` steps the rotation. So the crossbow shot cannot pipeline a different aim in its send
+ * tick. The flint-and-steel action is a block interaction; it also keeps the slab aim through that
+ * tick so the outgoing placement remains aligned with the ray used to choose its hit.
  */
 private fun ModuleAutoCart.enterShootStep(pipelineAim: Boolean) {
     phase = XbowPhase.SHOOT
@@ -369,7 +365,7 @@ private fun slabSupportAim(): Vec3 {
     return Vec3(slab.x + 0.5, slab.y.toDouble(), slab.z + 0.5)
 }
 
-/** Top face of the placed bottom slab — where the bucket's own raycast has to land. */
+/** Top face of the placed bottom slab — where the flint-and-steel click has to land. */
 private fun slabTopAim(): Vec3 {
     val slab = slabPos ?: return Vec3.ZERO
     return Vec3(slab.x + 0.5, slab.y + 0.5, slab.z + 0.5)
@@ -403,7 +399,7 @@ private fun ModuleAutoCart.xbowStart(rail: BlockPos) {
     if (!hasAllItems()) {
         return debug(
             "missing items — cart=${findHotbarItem(Items.TNT_MINECART) != -1} " +
-                "slab=${findSlabSlot() != -1} lava=${findHotbarItem(Items.LAVA_BUCKET) != -1} " +
+                "slab=${findSlabSlot() != -1} flintAndSteel=${findHotbarItem(Items.FLINT_AND_STEEL) != -1} " +
                 "chargedXbow=${findChargedCrossbow() != -1}"
         )
     }
@@ -415,8 +411,8 @@ private fun ModuleAutoCart.xbowStart(rail: BlockPos) {
     if (!isBottomSlab(slab) && findSlabSlot(mergingSlabBlock(slab.below())) == -1) {
         return debug("only slab in the hotbar would merge with the one below ${slab.toShortString()}")
     }
-    if (!canPlaceLavaAt(slab)) return debug("cannot place lava above ${slab.toShortString()}")
-    if (!hasShootingLine(rail, slab)) return debug("no shooting line clearing the slab through lava into the cart")
+    if (!canPlaceFireAt(slab)) return debug("cannot place fire above ${slab.toShortString()}")
+    if (!hasShootingLine(rail, slab)) return debug("no shooting line clearing the slab through fire into the cart")
 
     debug("armed: rail=${rail.toShortString()} slab=${slab.toShortString()}")
 
@@ -452,8 +448,8 @@ internal fun xbowReset() {
 }
 
 /**
- * The slab cell: the block directly between the player and the rail. The lava sits on it, so the
- * bolt crosses fire on its way to the cart without the lava touching the cart itself.
+ * The slab cell: the block directly between the player and the rail. Fire is lit above it, so the
+ * bolt crosses fire on its way to the cart without the fire touching the cart itself.
  */
 private fun ModuleAutoCart.findSlabCell(rail: BlockPos): BlockPos? {
     val railCenter = Vec3.atCenterOf(rail)
@@ -470,10 +466,12 @@ private fun ModuleAutoCart.findSlabCell(rail: BlockPos): BlockPos? {
     return cell
 }
 
-private fun ModuleAutoCart.canPlaceLavaAt(slab: BlockPos): Boolean {
-    if (hasLava(slab)) return true
-    val above = world.getBlockState(slab.above())
-    return above.isAir || above.canBeReplaced()
+private fun ModuleAutoCart.canPlaceFireAt(slab: BlockPos): Boolean {
+    val firePos = slab.above()
+    val fireCell = world.getBlockState(firePos)
+    if (fireCell.block is BaseFireBlock) return true
+    return (fireCell.isAir || fireCell.canBeReplaced()) &&
+        BaseFireBlock.canBePlacedAt(world, firePos, Direction.UP)
 }
 
 // ── Shot geometry ────────────────────────────────────────────────────────
@@ -482,18 +480,20 @@ private fun ModuleAutoCart.canPlaceLavaAt(slab: BlockPos): Boolean {
 private fun boltOrigin(): Vec3 = player.eyePosition.subtract(0.0, PROJECTILE_SPAWN_DROP, 0.0)
 
 /**
- * Does a bolt fired along the rotation the SERVER currently holds clear the slab, cross the lava and
+ * Does a bolt fired along the rotation the SERVER currently holds clear the slab, cross the fire and
  * land on the cart? This is the real condition, and a whole cone of rotations satisfies it — far
  * more forgiving than sighting a single computed point.
  */
 private fun shotLineValid(): Boolean {
     val rail = railPos ?: return false
+    val slab = slabPos ?: return false
     val origin = boltOrigin()
     val through = origin.add(RotationManager.serverRotation.directionVector.scale(RAY_LENGTH))
 
     if (crossesBox(origin, through, slabSolidBox())) return false
-    if (!crossesBox(origin, through, lavaBox())) return false
-    val entry = boxEntry(origin, through, cartBox(rail)) ?: return false
+    val targetBox = cartBox(rail)
+    if (!crossesFireBeforeCart(origin, through, fireBox(slab), targetBox)) return false
+    val entry = boxEntry(origin, through, targetBox) ?: return false
     return reachesUnobstructed(origin, entry)
 }
 
@@ -502,10 +502,11 @@ private fun cartBox(rail: BlockPos): AABB =
 
 /**
  * Walks candidate heights down the cart looking for a line that clears the slab's solid half,
- * crosses the lava (so the bolt ignites) and still lands on the cart.
+ * crosses the fire cell (so the bolt ignites) and still lands on the cart.
  */
 private fun shootTarget(): Vec3? {
     val rail = railPos ?: return null
+    val slab = slabPos ?: return null
     val origin = boltOrigin()
     val cart = findCart(rail)
 
@@ -521,7 +522,7 @@ private fun shootTarget(): Vec3? {
         val aim = Vec3(cx, baseY + height * f, cz)
         val entry = boxEntry(origin, aim, box)
         if (entry != null && !crossesBox(origin, aim, slabSolidBox()) && reachesUnobstructed(origin, entry)) {
-            if (crossesBox(origin, aim, lavaBox())) return aim
+            if (crossesFireBeforeCart(origin, aim, fireBox(slab), box)) return aim
             if (best == null) best = aim
         }
         f -= AIM_SCAN_STEP
@@ -540,17 +541,18 @@ private fun slabSolidBox(): AABB {
     return AABB(slab.x.toDouble(), slab.y.toDouble(), slab.z.toDouble(), slab.x + 1.0, slab.y + 0.5, slab.z + 1.0)
 }
 
-/** Where the lava actually is: the cell above the slab, or the slab's own upper half. */
-private fun lavaBox(): AABB {
-    val slab = slabPos ?: return AABB(BlockPos.ZERO)
-    if (world.getFluidState(slab.above()).`is`(Fluids.LAVA)) {
-        return AABB(slab.above()).deflate(0.02)
-    }
-    return AABB(slab.x + 0.02, slab.y + 0.5, slab.z + 0.02, slab.x + 0.98, slab.y + 1.0, slab.z + 0.98)
-}
+/** Fire is placed in the cell above the bottom slab. */
+private fun fireBox(slab: BlockPos): AABB = AABB(slab.above()).deflate(0.02)
 
 private fun crossesBox(from: Vec3, through: Vec3, box: AABB): Boolean =
     boxEntry(from, through, box) != null
+
+/** The bolt must pass through the fire cell before entering the cart. */
+private fun crossesFireBeforeCart(from: Vec3, through: Vec3, fire: AABB, cart: AABB): Boolean {
+    val fireEntry = boxEntry(from, through, fire) ?: return false
+    val cartEntry = boxEntry(from, through, cart) ?: return false
+    return fireEntry.distanceToSqr(from) < cartEntry.distanceToSqr(from)
+}
 
 /** First intersection of the (extended) `from → through` ray with [box], or null when it misses. */
 private fun boxEntry(from: Vec3, through: Vec3, box: AABB): Vec3? {
@@ -563,8 +565,7 @@ private fun boxEntry(from: Vec3, through: Vec3, box: AABB): Vec3? {
  * The boxes only say where the trap's parts are; this says nothing ELSE eats the bolt first. A
  * trench lip or a wall between the slab and the rail is invisible to the box tests, and a bolt
  * they let through but the world stops is a charged crossbow wasted — the one item that ends the
- * combo. Same clip an arrow flies by: COLLIDER (the rail has no collision shape) with fluids
- * ignored (the bolt crosses the lava, it does not stop in it).
+ * combo. Same clip an arrow flies by: COLLIDER (the rail has no collision shape).
  */
 private fun reachesUnobstructed(origin: Vec3, entry: Vec3): Boolean {
     val hit = world.clip(ClipContext(origin, entry, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player))
@@ -582,14 +583,13 @@ private fun hasShootingLine(rail: BlockPos, slab: BlockPos): Boolean {
     val slabSolid = AABB(
         slab.x.toDouble(), slab.y.toDouble(), slab.z.toDouble(), slab.x + 1.0, slab.y + 0.5, slab.z + 1.0
     )
-    val lava = AABB(slab.x + 0.02, slab.y + 0.5, slab.z + 0.02, slab.x + 0.98, slab.y + 1.05, slab.z + 0.98)
+    val fire = fireBox(slab)
 
     var f = AIM_SCAN_TOP
     while (f >= AIM_SCAN_PREFLIGHT_BOTTOM) {
         val aim = Vec3(rail.x + 0.5, rail.y + DEFAULT_CART_HEIGHT * f, rail.z + 0.5)
         if (!crossesBox(origin, aim, slabSolid) &&
-            crossesBox(origin, aim, lava) &&
-            crossesBox(origin, aim, cartBox)
+            crossesFireBeforeCart(origin, aim, fire, cartBox)
         ) {
             return true
         }
@@ -670,7 +670,7 @@ private fun swapTo(slot: Int): Boolean {
 private fun hasAllItems(): Boolean =
     findHotbarItem(Items.TNT_MINECART) != -1 &&
         findSlabSlot() != -1 &&
-        findHotbarItem(Items.LAVA_BUCKET) != -1 &&
+        findHotbarItem(Items.FLINT_AND_STEEL) != -1 &&
         findChargedCrossbow() != -1
 
 private fun findHotbarItem(item: Item): Int {
@@ -724,7 +724,7 @@ private fun isRail(pos: BlockPos): Boolean = world.getBlockState(pos).`is`(Block
 
 /**
  * The trap's geometry needs specifically a BOTTOM slab: its solid lower half is what the bolt has
- * to clear while the lava sits above it. A bare `BlockTags.SLABS` test also matches TOP and DOUBLE
+ * to clear while the fire sits above it. A bare `BlockTags.SLABS` test also matches TOP and DOUBLE
  * states — a solid upper half exactly where the bolt's corridor is supposed to be.
  */
 private fun isBottomSlab(pos: BlockPos): Boolean {
@@ -732,8 +732,8 @@ private fun isBottomSlab(pos: BlockPos): Boolean {
     return state.hasProperty(SlabBlock.TYPE) && state.getValue(SlabBlock.TYPE) == SlabType.BOTTOM
 }
 
-private fun hasLava(pos: BlockPos): Boolean =
-    world.getFluidState(pos).`is`(Fluids.LAVA) || world.getFluidState(pos.above()).`is`(Fluids.LAVA)
+private fun hasFire(pos: BlockPos): Boolean =
+    world.getBlockState(pos.above()).block is BaseFireBlock
 
 private fun canPlaceAt(pos: BlockPos): Boolean {
     val state = world.getBlockState(pos)

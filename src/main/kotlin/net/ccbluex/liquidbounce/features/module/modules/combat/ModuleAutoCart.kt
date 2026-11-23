@@ -87,9 +87,9 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
      *
      * - [CartMode.SKY_SHOT] — the original behaviour of this module: lob a Flame arrow into the
      *   sky and build rail + cart under where it will land, so the arrow comes down and lights it.
-     * - [CartMode.XBOW] — the lava cart bomb: you place a rail, the module adds the cart, a slab
-     *   between you and it, lava on the slab, then threads a crossbow bolt through the lava into
-     *   the cart. See `AutoCartXbow.kt`.
+     * - [CartMode.XBOW] — the fire cart bomb: you place a rail, the module adds the cart, a slab
+     *   between you and it, lights fire above the slab with flint and steel, then threads a crossbow
+     *   bolt through the fire into the cart. See `AutoCartXbow.kt`.
      */
     internal val mode by enumChoice("Mode", CartMode.SKY_SHOT)
 
