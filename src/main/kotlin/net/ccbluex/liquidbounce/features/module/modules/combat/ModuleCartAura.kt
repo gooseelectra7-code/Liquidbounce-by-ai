@@ -18,6 +18,7 @@
  */
 package net.ccbluex.liquidbounce.features.module.modules.combat
 
+import net.ccbluex.liquidbounce.event.events.PacketEvent
 import net.ccbluex.liquidbounce.event.handler
 import net.ccbluex.liquidbounce.event.tickHandler
 import net.ccbluex.liquidbounce.features.module.ClientModule
@@ -52,9 +53,10 @@ object ModuleCartAura : ClientModule("CartAura", ModuleCategories.COMBAT) {
 
     /** Somewhere a pop was seen; resolved on the tick once the victim is in the world. */
     @Suppress("unused")
-    private val popHandler = handler<ClientboundEntityEventPacket> { event ->
-        if (event.eventId != EntityEvent.PROTECTED_FROM_DEATH) return@handler
-        pendingPop = event
+    private val popHandler = handler<PacketEvent> { event ->
+        val packet = event.packet as? ClientboundEntityEventPacket ?: return@handler
+        if (packet.eventId != EntityEvent.PROTECTED_FROM_DEATH) return@handler
+        pendingPop = packet
     }
 
     @Suppress("unused")
@@ -62,7 +64,8 @@ object ModuleCartAura : ClientModule("CartAura", ModuleCategories.COMBAT) {
         val pop = pendingPop ?: return@tickHandler
         pendingPop = null
 
-        val victim = pop.getEntity(mc.level) as? Player ?: return@tickHandler
+        val level = mc.level ?: return@tickHandler
+        val victim = pop.getEntity(level) as? Player ?: return@tickHandler
         if (!victim.isAlive || !victim.shouldBeAttacked()) return@tickHandler
         if (victim.distanceToSqr(player) > range * range) return@tickHandler
 

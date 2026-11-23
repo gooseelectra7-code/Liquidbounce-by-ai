@@ -188,7 +188,7 @@ internal object AutoCartFire {
             // The user asked for the bolt to pass through the fire into the cart; a broken line
             // costs the charged crossbow — so aim at the rail and give the line a few ticks to
             // open up instead of firing a bolt into nothing.
-            aimAt(railHit(railPos))
+            aimAt(Vec3(railPos.x + 0.5, railPos.y + RAIL_SURFACE, railPos.z + 0.5))
             return
         }
         if (wireHitOn(railPos) == null) return
