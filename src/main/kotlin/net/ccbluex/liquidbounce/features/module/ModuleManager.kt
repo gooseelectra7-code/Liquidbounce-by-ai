@@ -36,6 +36,7 @@ import net.ccbluex.liquidbounce.event.tickUntil
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAimbot
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAnchorOptimizer
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoCart
+import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleCartAura
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoWeb
 import net.ccbluex.liquidbounce.features.module.modules.combat.ModuleAutoClicker
 import net.ccbluex.liquidbounce.features.module.modules.combat.autocity.ModuleAutoCity
@@ -119,6 +120,7 @@ import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleAutoAccept
 import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleAutoAccount
 import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleAutoChatGame
 import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleAutoPearl
+import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleAutoPearlCatch
 import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleBetterTab
 import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleBookBot
 import net.ccbluex.liquidbounce.features.module.modules.misc.ModuleCrystalOptimizer
@@ -561,6 +563,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             { ModuleAutoArmor },
             { ModuleAutoBow },
             { ModuleAutoCart },
+            { ModuleCartAura },
             { ModuleAutoClicker },
             { ModuleCrystalAura },
             { ModuleAutoAnchor },
@@ -668,6 +671,7 @@ object ModuleManager : EventListener, Collection<ClientModule> by modules {
             { ModuleReportHelper },
             { ModuleTargetLock },
             { ModuleAutoPearl },
+            { ModuleAutoPearlCatch },
             { ModuleAntiStaff },
             { ModuleFlagCheck },
             { ModulePacketLogger },

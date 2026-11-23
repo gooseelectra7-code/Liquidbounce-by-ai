@@ -614,6 +614,32 @@ CLAIM to be verified, not a result.
   placement (`placeOne` only requests then, `ticksUntilReset = 1`). Do NOT convert this to a
   KillAura-yields-flag: the aura must keep requesting at its own priority, so when our request
   lapses its plan is already top of the queue and the aim never passes through a reset tick.
+- `combat/AutoCartFire.kt` — the FIRE/BIND mode chain of **AutoCart** (rails → TNT minecart →
+  flint & steel on the block between player and rail → charged crossbow through it → detonate).
+  Invariants, do NOT regress:
+  - One use-item per tick, swaps through `player.inventory.selectedSlot` + `ensureHasSentCarriedItem`,
+    swap leads the window, one use per tick (Grim `PacketOrderE`).
+  - Every click re-checks `RotationManager.serverRotation` (settle gate) and `inReach`
+    (`blockInteractionRange - 0.05`, grim FarPlace) before it acts; grim settle gate = wire hit on the target.
+  - grim audit status: pending — mirror of `AutoCartXbow`'s already-audited shapes; audits needed
+    against Grim `AirLiquidPlace`/`MultiActionsF`/`BadPacketsJ` when the clone is available
+    (clone per AGENTS.md does not exist on this machine).
+- `combat/ModuleCartAura.kt` — **CartAura**: the AutoCartFire chain fired around a popped
+  target. Trigger: `ClientboundEntityEventPacket` (`PROTECTED_FROM_DEATH`) parked on netty,
+  resolved on tick (`ModuleTotemPopESP.kt:93-118` idiom). One chain per pop, spaced by Cooldown.
+  grim audit: chain packets are AutoCartFire's (same shape); pop detection is a server packet.
+  NOT Grim-audited (reuses the chain shape).
+- `misc/ModuleAutoPearlCatch.kt` — **AutoPearlCatch**: throws a wind charge at your own pearl
+  mid-air. Detects own pearl via `ClientboundAddEntityPacket` (`EntityType.ENDER_PEARL`) + pearl
+  in offhand/hotbar (`ModuleAutoPearl.kt:135-140`). Prediction = generic throwable physics
+  (`TrajectoryInfo.GENERIC`: pos += vel; vel = vel * 0.99 − gravity(0.03)); first free tick within
+  Range with a clear line from the eye wins. grim audit status: pending — wind-charge throw shape
+  mirrors `ModuleAutoWindCharge`/`ModuleDiveBomb`; `ProjectileOrder`-style check in Grim once
+  clone available.
+- `ModuleAutoCart` — **AutoCart** now also runs the Fire chain from `CartMode.FIRE`
+  (`AutoCartFire.tick()` on the module tick) and the Bind chain from `CartMode.BIND` (module bind
+  press → `AutoCartFire.onBindPress()`); `ModuleAutoCart.reset()` calls `AutoCartFire.reset()`.
+  Note: the pre-existing `CartMode.XBOW` (lava cart bomb, `AutoCartXbow.kt`) is untouched.
   KillAura's `canAttackNow` reads `ModuleAutoWeb.placedThisTick` and skips the attack on a tick
   a web went down (block + entity interaction in one window = MultiActionsF/PacketOrderJ); the
   ordering is guaranteed because every `RotationUpdateEvent` handler runs inside RotationManager's

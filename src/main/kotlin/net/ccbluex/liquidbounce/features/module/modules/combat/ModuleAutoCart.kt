@@ -56,9 +56,11 @@ import net.minecraft.world.item.enchantment.Enchantments
 import net.minecraft.world.level.ClipContext
 import net.minecraft.world.level.block.BaseRailBlock
 import net.minecraft.world.phys.AABB
+import net.ccbluex.liquidbounce.event.events.KeyEvent
 import net.minecraft.world.phys.BlockHitResult
 import net.minecraft.world.phys.HitResult
 import net.minecraft.world.phys.Vec3
+import org.lwjgl.glfw.GLFW
 
 /**
  * AutoCart module
@@ -83,19 +85,26 @@ import net.minecraft.world.phys.Vec3
 object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
 
     /**
-     * Which combo to run. The two share nothing but the TNT minecart:
+     * Which combo to run.
      *
      * - [CartMode.SKY_SHOT] — the original behaviour of this module: lob a Flame arrow into the
      *   sky and build rail + cart under where it will land, so the arrow comes down and lights it.
      * - [CartMode.XBOW] — the fire cart bomb: you place a rail, the module adds the cart, a slab
      *   between you and it, lights fire above the slab with flint and steel, then threads a crossbow
      *   bolt through the fire into the cart. See `AutoCartXbow.kt`.
+     * - [CartMode.FIRE] — the rail→TNT minecart→flint & steel→crossbow chain: the module places
+     *   a rail, puts a TNT minecart on it, lights the block on the player side of the rail with
+     *   flint and steel, and fires a charged crossbow through it, setting the cart off. See
+     *   `AutoCartFire.kt`.
+     * - [CartMode.BIND] — [CartMode.FIRE]'s chain, started once on the module's bind press.
      */
     internal val mode by enumChoice("Mode", CartMode.SKY_SHOT)
 
     internal enum class CartMode(override val tag: String) : Tagged {
         SKY_SHOT("SkyShot"),
-        XBOW("Xbow")
+        XBOW("Xbow"),
+        FIRE("Fire"),
+        BIND("Bind")
     }
 
     /** Settings that only apply to [CartMode.XBOW]. */
@@ -384,6 +393,30 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
         }
     }
 
+    /**
+     * Fire mode: [AutoCartFire] runs its chain on the module tick while Mode = FIRE.
+     */
+    @Suppress("unused")
+    private val fireHandler = tickHandler {
+        if (mode == CartMode.FIRE) {
+            AutoCartFire.tick()
+        }
+    }
+
+    /**
+     * Bind mode: pressing the module's own bind starts the [AutoCartFire] chain once.
+     */
+    @Suppress("unused")
+    private val bindKeyHandler = handler<KeyEvent> { event ->
+        if (
+            mode == CartMode.BIND &&
+            event.action == GLFW.GLFW_PRESS &&
+            event.key.value == bindValue.get().boundKey.value
+        ) {
+            AutoCartFire.onBindPress()
+        }
+    }
+
     @Suppress("unused")
     private val sequenceHandler = tickHandler {
         if (awaitingArrowTicks > 0 && --awaitingArrowTicks == 0) {
@@ -655,6 +688,7 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
     // ---------------------------------------------------------------- state
 
     private fun reset() {
+        AutoCartFire.reset()
         restoreSlot()
         phase = Phase.IDLE
         landing = null
