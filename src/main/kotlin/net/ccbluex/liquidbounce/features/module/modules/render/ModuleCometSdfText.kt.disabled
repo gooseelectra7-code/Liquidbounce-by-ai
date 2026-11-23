@@ -1,0 +1,424 @@
+/*
+ * This file is part of LiquidBounce (https://github.com/CCBlueX/LiquidBounce)
+ *
+ * Copyright (c) 2015 - 2026 CCBlueX
+ *
+ * LiquidBounce is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * LiquidBounce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with LiquidBounce. If not, see <https://www.gnu.org/licenses/>.
+ */
+package net.ccbluex.liquidbounce.features.module.modules.render
+
+import com.ferra13671.cometrenderer.CometLoaders
+import com.ferra13671.cometrenderer.CometRenderer
+import com.ferra13671.cometrenderer.glsl.GlProgram
+import com.ferra13671.cometrenderer.glsl.shader.ShaderType
+import com.ferra13671.cometrenderer.minecraft.CRM
+import com.ferra13671.cometrenderer.minecraft.CRMInstance
+import com.ferra13671.cometrenderer.minecraft.RenderColor
+import com.ferra13671.cometrenderer.minecraft.batch.AbstractPrimitiveBatch
+import com.ferra13671.cometrenderer.minecraft.event.RenderHudCallback
+import com.ferra13671.cometrenderer.vertex.DrawMode
+import com.ferra13671.cometrenderer.vertex.element.VertexElementType
+import com.ferra13671.cometrenderer.vertex.format.VertexFormat
+import com.ferra13671.cometrenderer.vertex.mesh.Mesh
+import com.ferra13671.gltextureutils.GLTexture
+import com.ferra13671.gltextureutils.TextureFiltering
+import com.ferra13671.gltextureutils.TextureWrapping
+import com.ferra13671.gltextureutils.loader.TextureLoaders
+import net.ccbluex.liquidbounce.features.module.ClientModule
+import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.utils.client.logger
+import net.ccbluex.liquidbounce.utils.client.mc
+import java.awt.Color
+import java.awt.Font
+import java.awt.RenderingHints
+import java.awt.font.FontRenderContext
+import java.awt.image.BufferedImage
+
+/**
+ * Smooth, scalable text on CometRenderer via a **single-channel signed distance field (SDF)** atlas —
+ * any `java.awt.Font`, no Minecraft font, no browser.
+ *
+ * Each glyph is rasterized once at [EM_SIZE]px, converted to an SDF (distance to the nearest edge,
+ * via a Felzenszwalb Euclidean distance transform), and packed into one atlas texture sampled with
+ * linear filtering. A custom GLSL program then renders glyph quads, recovering crisp antialiased
+ * edges at any size with `smoothstep(0.5, dist)` using screen-space derivatives (`fwidth`). The result
+ * is resolution-independent — sharp from 8px to 200px from one small atlas.
+ *
+ * (Single-channel SDF slightly rounds very sharp corners under heavy magnification; upgrading to a
+ * 3-channel MSDF later keeps the same atlas/shader/batch plumbing.)
+ */
+object ModuleCometSdfText : ClientModule("CometSdfText", ModuleCategories.RENDER) {
+
+    private const val EM_SIZE = 48          // glyph raster size for SDF generation
+    private const val SS = 4                // supersampling factor for smooth distance field
+    private const val SPREAD = 6            // SDF padding/range in px around each glyph
+    private const val CHARSET_START = 32    // printable ASCII
+    private const val CHARSET_END = 126
+
+    private val originX by float("OriginX", 16f, 0f..400f)
+    private val originY by float("OriginY", 30f, 0f..400f)
+    private val fontSize by float("FontSize", 18f, 6f..120f)
+
+    private var instance: CRMInstance? = null
+    private var sdfFont: SdfFont? = null
+    private var ready = false
+    private var failed = false
+
+    init {
+        RenderHudCallback.EVENT.register(RenderHudCallback {
+            if (!running) {
+                return@RenderHudCallback
+            }
+            val crm = ensureResources() ?: return@RenderHudCallback
+
+            crm.setupUIMatrix()
+            try {
+                draw()
+            } catch (e: Throwable) {
+                logger.error("CometRenderer SDF text draw failed", e)
+            } finally {
+                crm.restoreUIMatrix()
+            }
+        })
+    }
+
+    private fun uiScale() = mc.window.guiScale.toInt().coerceAtLeast(1)
+
+    private fun ensureResources(): CRMInstance? {
+        if (failed) return null
+        return try {
+            if (!ready) {
+                instance = CRMInstance { 1 } // physical-pixel space
+                sdfFont = SdfFont(Font("SansSerif", Font.PLAIN, EM_SIZE))
+                ready = true
+            }
+            instance
+        } catch (e: Throwable) {
+            failed = true
+            logger.error("Failed to initialize CometRenderer SDF font", e)
+            null
+        }
+    }
+
+    private fun draw() {
+        val f = sdfFont ?: return
+        val s = uiScale()
+        val x = originX * s
+        var y = originY * s
+        val px = fontSize * s
+
+        y = f.drawLine("LiquidBounce SDF text", x, y, px, RenderColor.WHITE)
+        y = f.drawLine("Smooth & scalable: AVAWTo 0123456789", x, y, px, RenderColor.of(Color.CYAN))
+        y = f.drawLine("Holes: o a e B R d g p q 8 % & @", x, y, px, RenderColor.of(Color.YELLOW))
+        f.drawLine("Big & sharp", x, y, px * 3.5f, RenderColor.of(Color.MAGENTA))
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // SDF font: rasterize glyphs, build distance-field atlas, draw glyph quads via custom SDF shader.
+    // ---------------------------------------------------------------------------------------------
+
+    private class SdfFont(font: Font) {
+        private val frc = FontRenderContext(null, true, true)
+        private val lineMetrics = font.getLineMetrics("Ag", frc)
+        private val ascent = lineMetrics.ascent
+        private val lineHeight = lineMetrics.height
+
+        private val atlas: GLTexture
+        private val atlasSize: Int
+        private val glyphs = HashMap<Char, Glyph>()
+        private val program: GlProgram = buildSdfProgram()
+
+        /** Atlas UV rect + placement of the SDF cell relative to the pen origin (in EM-px units). */
+        private class Glyph(
+            val u0: Float, val v0: Float, val u1: Float, val v1: Float,
+            val offsetX: Float, val offsetY: Float, // cell top-left relative to pen origin / baseline
+            val cellW: Float, val cellH: Float,      // cell size in EM-px
+            val advance: Float,
+        )
+
+        init {
+            // Pre-generate the printable ASCII set into one shelf-packed SDF atlas.
+            val cells = ArrayList<Pair<Char, CellData>>()
+            for (code in CHARSET_START..CHARSET_END) {
+                val ch = code.toChar()
+                generateCell(font, ch)?.let { cells.add(ch to it) }
+            }
+
+            // Shelf-pack into a fixed square atlas (ASCII @ 48px+pad fits comfortably in 1024²).
+            atlasSize = 1024
+            val image = BufferedImage(atlasSize, atlasSize, BufferedImage.TYPE_INT_ARGB)
+
+            var cx = 1
+            var cy = 1
+            var rowH = 0
+            for ((ch, cell) in cells) {
+                if (cx + cell.w + 1 > atlasSize) {
+                    cx = 1
+                    cy += rowH + 1
+                    rowH = 0
+                }
+                if (cy + cell.h + 1 > atlasSize) {
+                    logger.error("CometSdfText: atlas overflow, skipping remaining glyphs")
+                    break
+                }
+                // Write SDF bytes into atlas (grayscale → R=G=B=sdf, A=255).
+                for (py in 0 until cell.h) {
+                    for (px in 0 until cell.w) {
+                        val v = cell.sdf[py * cell.w + px].toInt() and 0xFF
+                        image.setRGB(cx + px, cy + py, (0xFF shl 24) or (v shl 16) or (v shl 8) or v)
+                    }
+                }
+                glyphs[ch] = Glyph(
+                    cx.toFloat() / atlasSize, cy.toFloat() / atlasSize,
+                    (cx + cell.w).toFloat() / atlasSize, (cy + cell.h).toFloat() / atlasSize,
+                    cell.offsetX, cell.offsetY, cell.w.toFloat(), cell.h.toFloat(), cell.advance,
+                )
+                cx += cell.w + 1
+                rowH = maxOf(rowH, cell.h)
+            }
+
+            atlas = TextureLoaders.BUFFERED_IMAGE.createTextureBuilder()
+                .name("CometSdfAtlas")
+                .info(image)
+                .filtering(TextureFiltering.SMOOTH) // linear sampling is essential for SDF AA
+                .wrapping(TextureWrapping.DEFAULT)
+                .build()
+
+            logger.info("CometSdfText: built ${glyphs.size}-glyph SDF atlas ${atlasSize}x$atlasSize")
+        }
+
+        private class CellData(
+            val sdf: ByteArray, val w: Int, val h: Int,
+            val offsetX: Float, val offsetY: Float, val advance: Float,
+        )
+
+        private fun generateCell(font: Font, ch: Char): CellData? {
+            val gv = font.createGlyphVector(frc, ch.toString())
+            val advance = gv.getGlyphMetrics(0).advanceX
+            val bounds = gv.getGlyphOutline(0).bounds2D
+            if (bounds.width <= 0.0 || bounds.height <= 0.0) {
+                return CellData(ByteArray(0), 0, 0, 0f, 0f, advance) // e.g. space
+            }
+
+            // Low-res cell dimensions (what we store in the atlas).
+            val w = Math.ceil(bounds.width).toInt() + 2 * SPREAD
+            val h = Math.ceil(bounds.height).toInt() + 2 * SPREAD
+
+            // Rasterize the glyph at SS× resolution so the distance field is smooth, not pixel-stepped.
+            val hw = w * SS
+            val hh = h * SS
+            val img = BufferedImage(hw, hh, BufferedImage.TYPE_INT_ARGB)
+            val g = img.createGraphics()
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g.scale(SS.toDouble(), SS.toDouble())
+            g.color = Color.WHITE
+            g.translate(-bounds.x + SPREAD, -bounds.y + SPREAD)
+            g.fill(gv.getGlyphOutline(0))
+            g.dispose()
+
+            val inside = BooleanArray(hw * hh)
+            for (i in 0 until hw * hh) {
+                inside[i] = ((img.getRGB(i % hw, i / hw) ushr 24) and 0xFF) > 127
+            }
+
+            // Signed distance in HIGH-res pixel units, then downsample to the low-res cell.
+            val signedHi = computeSignedDistance(inside, hw, hh)
+            val sdf = ByteArray(w * h)
+            val rangeHi = SPREAD.toDouble() * SS // distance range in high-res px
+            for (cyk in 0 until h) {
+                for (cxk in 0 until w) {
+                    // Average the SS×SS block of signed distances for this low-res texel.
+                    var sum = 0.0
+                    for (sy in 0 until SS) {
+                        for (sx in 0 until SS) {
+                            sum += signedHi[(cyk * SS + sy) * hw + (cxk * SS + sx)]
+                        }
+                    }
+                    val avg = sum / (SS * SS)
+                    val norm = (0.5 + avg / (2.0 * rangeHi)).coerceIn(0.0, 1.0)
+                    sdf[cyk * w + cxk] = (norm * 255.0).toInt().toByte()
+                }
+            }
+
+            val offsetX = bounds.x.toFloat() - SPREAD
+            val offsetY = bounds.y.toFloat() - SPREAD
+            return CellData(sdf, w, h, offsetX, offsetY, advance)
+        }
+
+        /** Signed distance (positive inside, negative outside) in pixel units, via two EDT passes. */
+        private fun computeSignedDistance(inside: BooleanArray, w: Int, h: Int): DoubleArray {
+            val inf = 1e20
+            val gridIn = DoubleArray(w * h) { if (inside[it]) 0.0 else inf }
+            val gridOut = DoubleArray(w * h) { if (inside[it]) inf else 0.0 }
+            edt2d(gridIn, w, h)
+            edt2d(gridOut, w, h)
+            val out = DoubleArray(w * h)
+            for (i in 0 until w * h) {
+                val dOut = Math.sqrt(gridIn[i])  // outside→glyph distance (0 if inside)
+                val dIn = Math.sqrt(gridOut[i])  // inside→edge distance (0 if outside)
+                out[i] = dIn - dOut              // positive inside, negative outside
+            }
+            return out
+        }
+
+        private fun edt2d(grid: DoubleArray, w: Int, h: Int) {
+            val col = DoubleArray(h)
+            for (x in 0 until w) {
+                for (y in 0 until h) col[y] = grid[y * w + x]
+                val d = edt1d(col, h)
+                for (y in 0 until h) grid[y * w + x] = d[y]
+            }
+            val row = DoubleArray(w)
+            for (y in 0 until h) {
+                for (x in 0 until w) row[x] = grid[y * w + x]
+                val d = edt1d(row, w)
+                for (x in 0 until w) grid[y * w + x] = d[x]
+            }
+        }
+
+        private fun edt1d(f: DoubleArray, n: Int): DoubleArray {
+            val d = DoubleArray(n)
+            val v = IntArray(n)
+            val z = DoubleArray(n + 1)
+            var k = 0
+            v[0] = 0
+            z[0] = -1e20
+            z[1] = 1e20
+            for (q in 1 until n) {
+                var s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2.0 * q - 2.0 * v[k])
+                while (k > 0 && s <= z[k]) {
+                    k--
+                    s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2.0 * q - 2.0 * v[k])
+                }
+                k++
+                v[k] = q
+                z[k] = s
+                z[k + 1] = 1e20
+            }
+            k = 0
+            for (q in 0 until n) {
+                while (z[k + 1] < q) k++
+                val dist = (q - v[k]).toDouble()
+                d[q] = dist * dist + f[v[k]]
+            }
+            return d
+        }
+
+        fun drawLine(text: String, startX: Float, topY: Float, px: Float, color: RenderColor): Float {
+            val scale = px / EM_SIZE
+            val baseY = topY + ascent * scale
+
+            var quads = 0
+            for (ch in text) if ((glyphs[ch]?.cellW ?: 0f) > 0f) quads++
+            if (quads > 0) {
+                // POSITION_TEXTURE vertex = 12 (pos) + 8 (uv) = 20 bytes; 4 verts/quad = 80 bytes,
+                // plus index buffer + overhead. Size generously to avoid AllocatorOverflowException.
+                val batch = SdfBatch(program, atlas.texId, color, quads * 160 + 4096)
+                var pen = startX
+                for (ch in text) {
+                    val g = glyphs[ch] ?: continue
+                    if (g.cellW > 0f) {
+                        val gx = pen + g.offsetX * scale
+                        val gy = baseY + g.offsetY * scale
+                        batch.rect(gx, gy, g.cellW * scale, g.cellH * scale, g.u0, g.v0, g.u1, g.v1)
+                    }
+                    pen += g.advance * scale
+                }
+                batch.build().tryDraw().close()
+            }
+            return topY + lineHeight * scale
+        }
+    }
+
+    /** Builds the SDF GLSL program: vertex = position-texture clone, fragment = smoothstep on distance. */
+    private fun buildSdfProgram(): GlProgram {
+        val vert = CometLoaders.STRING.createShaderBuilder()
+            .info("comet-sdf.vert", VERT_SRC, ShaderType.Vertex)
+            .build()
+        val frag = CometLoaders.STRING.createShaderBuilder()
+            .info("comet-sdf.frag", FRAG_SRC, ShaderType.Fragment)
+            .sampler("u_Texture")
+            .build()
+        return CometLoaders.STRING.createProgramBuilder()
+            .name("comet-sdf")
+            .shader(vert)
+            .shader(frag)
+            .build()
+    }
+
+    private val VERT_SRC = """
+        #version auto
+
+        in vec4 position;
+        #inouts {
+            vec2 texPos;
+        };
+        in vec2 UV;
+
+        #include<matrices>
+
+        void main() {
+            gl_Position = projMat * modelViewMat * position;
+            texPos = texPos_in;
+        }
+    """.trimIndent()
+
+    private val FRAG_SRC = """
+        #version auto
+
+        precision highp float;
+
+        in vec2 texPos;
+
+        #include<shaderColor>
+        uniform sampler2D u_Texture;
+
+        out vec4 fragColor;
+
+        void main() {
+            float dist = texture(u_Texture, texPos).r;
+            float w = fwidth(dist);
+            float alpha = smoothstep(0.5 - w, 0.5 + w, dist);
+            fragColor = vec4(shaderColor.rgb, shaderColor.a * alpha);
+        }
+    """.trimIndent()
+
+    /** Glyph-quad batch on the custom SDF program; POSITION_TEXTURE mesh like BasicTextureBatch. */
+    private class SdfBatch(
+        private val program: GlProgram, private val textureId: Int, color: RenderColor, allocBytes: Int,
+    ) : AbstractPrimitiveBatch(Mesh.builder(allocBytes, DrawMode.QUADS, VertexFormat.POSITION_TEXTURE)) {
+
+        init {
+            preDrawRunnable = Runnable {
+                CometRenderer.getShaderColor().setColor(color.toVector4f())
+            }
+        }
+
+        fun rect(x: Float, y: Float, w: Float, h: Float, u0: Float, v0: Float, u1: Float, v1: Float): SdfBatch {
+            meshBuilder.vertex(x, y, 0f).element("Texture", VertexElementType.FLOAT, u0, v0)
+            meshBuilder.vertex(x, y + h, 0f).element("Texture", VertexElementType.FLOAT, u0, v1)
+            meshBuilder.vertex(x + w, y + h, 0f).element("Texture", VertexElementType.FLOAT, u1, v1)
+            meshBuilder.vertex(x + w, y, 0f).element("Texture", VertexElementType.FLOAT, u1, v0)
+            return this
+        }
+
+        override fun draw() {
+            CometRenderer.setCurrentProgram(program)
+            program.getSampler(0).set(textureId)
+            CometRenderer.applyShaderColorUniform()
+            CRM.applyMatrixUniform()
+            CometRenderer.draw(mesh, false)
+        }
+    }
+}

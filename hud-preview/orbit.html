@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit HUD</title>
+<link rel="stylesheet" href="css/orbit.css">
+</head>
+<body>
+
+<div class="frame" id="frame">
+  <div class="stage" id="stage">
+    <img class="scene" src="assets/scene.jpg" alt="">
+    <div class="crosshair"></div>
+
+    <!-- ── watermark ────────────────────────────────────────────────────── -->
+    <div class="hud watermark" data-el="watermark">
+      <span class="mark"><img src="assets/logo.png" alt=""></span>
+      <span class="name">LiquidBounce</span>
+      <i class="div"></i>
+      <span class="pair"><b id="fps">142</b><em>fps</em></span>
+      <i class="div"></i>
+      <span class="pair"><b id="ping">21</b><em>ms</em></span>
+      <i class="div"></i>
+      <span class="pair"><b id="clock">02:40</b></span>
+    </div>
+
+    <!-- ── stock counters ───────────────────────────────────────────────── -->
+    <div class="hud stock" data-el="stock">
+      <div class="row"><img src="assets/item_totem_of_undying.png" alt=""><span class="qty">x34</span><span class="what">Тотем бессмертия</span></div>
+      <div class="row"><img src="assets/item_end_crystal.png" alt=""><span class="qty">x47</span><span class="what">Кристалл Энда</span></div>
+      <div class="row"><img src="assets/item_golden_apple.png" alt=""><span class="qty">x12</span><span class="what">Золотое яблоко</span></div>
+      <div class="row"><img src="assets/item_ender_pearl.png" alt=""><span class="qty">x16</span><span class="what">Жемчуг Энда</span></div>
+      <div class="row"><img src="assets/item_experience_bottle.png" alt=""><span class="qty">x9</span><span class="what">Пузырёк опыта</span></div>
+    </div>
+
+    <!-- ── modules ──────────────────────────────────────────────────────── -->
+    <div class="hud modules" data-el="modules">
+      <div class="head"><span>Модули</span><b>12</b></div>
+      <div class="row"><span>KillAura</span><em>Crystal</em></div>
+      <div class="row"><span>AutoCrystal</span><em>Grim</em></div>
+      <div class="row"><span>Surround</span><em></em></div>
+      <div class="row"><span>AutoTotem</span><em></em></div>
+      <div class="row"><span>Scaffold</span><em>Expand</em></div>
+      <div class="row"><span>Speed</span><em>Strafe</em></div>
+      <div class="row"><span>InventoryMove</span><em></em></div>
+      <div class="row"><span>NoJumpDelay</span><em></em></div>
+      <div class="row"><span>FullBright</span><em></em></div>
+      <div class="row"><span>Trajectories</span><em></em></div>
+      <div class="row"><span>ItemBind</span><em></em></div>
+      <div class="row"><span>Sprint</span><em></em></div>
+    </div>
+
+    <!-- ── keybinds ─────────────────────────────────────────────────────── -->
+    <div class="hud binds" data-el="binds">
+      <div class="head"><span>Бинды</span></div>
+      <div class="row"><img src="assets/item_end_crystal.png" alt=""><span>AutoCrystal</span><kbd>M3</kbd></div>
+      <div class="row"><img src="assets/item_netherite_pickaxe.png" alt=""><span>SpeedMine</span><kbd>K</kbd></div>
+      <div class="row"><img src="assets/item_obsidian.png" alt=""><span>Surround</span><kbd>V</kbd></div>
+      <div class="row"><img src="assets/item_totem_of_undying.png" alt=""><span>AutoTotem</span><kbd>X</kbd></div>
+    </div>
+
+    <!-- ── effects ──────────────────────────────────────────────────────── -->
+    <div class="hud potions" data-el="potions">
+      <div class="head"><span>Эффекты</span></div>
+      <div class="row"><img src="assets/effect_speed.png" alt=""><span>Скорость <b>II</b></span><time>беск.</time></div>
+      <div class="row"><img src="assets/effect_resistance.png" alt=""><span>Сопротивление <b>IV</b></span><time>беск.</time></div>
+      <div class="row"><img src="assets/effect_strength.png" alt=""><span>Сила <b>II</b></span><time>0:42</time></div>
+      <div class="row low"><img src="assets/effect_regeneration.png" alt=""><span>Регенерация <b>II</b></span><time>0:06</time></div>
+    </div>
+
+    <!-- ── target ───────────────────────────────────────────────────────── -->
+    <div class="hud target" data-el="target">
+      <div class="face"><img src="assets/skin_face.png" alt=""></div>
+      <div class="body">
+        <div class="line"><span class="nick">RediskaFPV</span><span class="dist">3.4 м</span></div>
+        <div class="gear">
+          <img src="assets/item_netherite_helmet.png" alt="">
+          <img src="assets/item_netherite_chestplate.png" alt="">
+          <img src="assets/item_netherite_leggings.png" alt="">
+          <img src="assets/item_netherite_boots.png" alt="">
+          <img src="assets/item_netherite_sword.png" alt="">
+          <img src="assets/item_totem_of_undying.png" alt="">
+        </div>
+      </div>
+      <div class="hp">
+        <svg viewBox="0 0 76 76" aria-hidden="true">
+          <circle class="track" cx="38" cy="38" r="31"></circle>
+          <circle class="arc glow" cx="38" cy="38" r="31"></circle>
+          <circle class="arc" cx="38" cy="38" r="31"></circle>
+        </svg>
+        <b>12</b>
+      </div>
+    </div>
+
+    <!-- ── toasts ───────────────────────────────────────────────────────── -->
+    <div class="hud toasts" data-el="toasts">
+      <div class="toast on"><i></i><span class="who">KillAura</span><span class="msg">включён</span></div>
+      <div class="toast off"><i></i><span class="who">Speed</span><span class="msg">выключен</span></div>
+      <div class="toast info"><i></i><span class="who">TotemPopESP</span><span class="msg">RediskaFPV — 3</span></div>
+    </div>
+
+    <!-- ── armour ───────────────────────────────────────────────────────── -->
+    <div class="hud armour" data-el="armour">
+      <div class="row">
+        <img src="assets/item_netherite_helmet.png" alt="">
+        <span>Незер. шлем</span><b>309</b>
+        <span class="bar"><i style="width:74%"></i></span>
+      </div>
+      <div class="row">
+        <img src="assets/item_netherite_chestplate.png" alt="">
+        <span>Незер. нагрудник</span><b>328</b>
+        <span class="bar"><i style="width:55%"></i></span>
+      </div>
+      <div class="row">
+        <img src="assets/item_netherite_leggings.png" alt="">
+        <span>Незер. поножи</span><b>500</b>
+        <span class="bar"><i style="width:91%"></i></span>
+      </div>
+      <div class="row warn">
+        <img src="assets/item_netherite_boots.png" alt="">
+        <span>Незер. ботинки</span><b>131</b>
+        <span class="bar"><i style="width:33%"></i></span>
+      </div>
+    </div>
+
+    <!-- ── hotbar with vitals ───────────────────────────────────────────── -->
+    <div class="hud vitals" data-el="vitals">
+      <div class="stat hp"><em>hp</em><b>20</b><span class="bar"><i style="width:100%"></i></span></div>
+      <div class="stat food"><em>food</em><b>17</b><span class="bar"><i style="width:85%"></i></span></div>
+      <div class="stat armor"><em>armor</em><b>20</b><span class="bar"><i style="width:100%"></i></span></div>
+      <div class="stat xp"><em>lvl</em><b>30</b><span class="bar"><i style="width:62%"></i></span></div>
+    </div>
+
+    <div class="hud hotbar" data-el="hotbar">
+      <div class="slot off"><img src="assets/item_totem_of_undying.png" alt=""></div>
+      <div class="gap"></div>
+      <div class="slot"><img src="assets/item_totem_of_undying.png" alt=""><span>34</span></div>
+      <div class="slot on"><img src="assets/item_netherite_sword.png" alt=""><i class="dura" style="width:82%"></i></div>
+      <div class="slot"><img src="assets/item_netherite_pickaxe.png" alt=""><i class="dura" style="width:61%"></i></div>
+      <div class="slot"><img src="assets/item_end_crystal.png" alt=""><span>47</span></div>
+      <div class="slot"><img src="assets/item_obsidian.png" alt=""><span>64</span></div>
+      <div class="slot"><img src="assets/item_golden_apple.png" alt=""><span>12</span></div>
+      <div class="slot"><img src="assets/item_experience_bottle.png" alt=""><span>9</span></div>
+      <div class="slot"><img src="assets/item_ender_pearl.png" alt=""><span>16</span></div>
+      <div class="slot"><img src="assets/item_cobweb.png" alt=""><span>21</span></div>
+    </div>
+
+    <!-- ── info ─────────────────────────────────────────────────────────── -->
+    <div class="hud info" data-el="info">
+      <span class="tag">Инфо</span>
+      <i class="div"></i>
+      <span class="pair"><em>xyz</em><b>-84 64 296</b></span>
+      <i class="div"></i>
+      <span class="pair"><em>bps</em><b>9.46</b></span>
+      <i class="div"></i>
+      <span class="pair"><em>dir</em><b>СЗ</b></span>
+    </div>
+  </div>
+</div>
+
+<script src="js/orbit-hud.js"></script>
+</body>
+</html>

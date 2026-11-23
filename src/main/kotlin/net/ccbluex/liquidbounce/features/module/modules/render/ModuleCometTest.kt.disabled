@@ -1,0 +1,307 @@
+/*
+ * This file is part of LiquidBounce (https://github.com/CCBlueX/LiquidBounce)
+ *
+ * Copyright (c) 2015 - 2026 CCBlueX
+ *
+ * LiquidBounce is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * LiquidBounce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with LiquidBounce. If not, see <https://www.gnu.org/licenses/>.
+ */
+package net.ccbluex.liquidbounce.features.module.modules.render
+
+import com.ferra13671.cometrenderer.CometRenderer
+import com.ferra13671.cometrenderer.minecraft.CRMInstance
+import com.ferra13671.cometrenderer.minecraft.RectColors
+import com.ferra13671.cometrenderer.minecraft.RenderColor
+import com.ferra13671.cometrenderer.minecraft.batch.impl.BasicBlurBatch
+import com.ferra13671.cometrenderer.minecraft.batch.impl.BasicRectBatch
+import com.ferra13671.cometrenderer.minecraft.batch.impl.BasicTextureBatch
+import com.ferra13671.cometrenderer.minecraft.batch.impl.ColoredRectBatch
+import com.ferra13671.cometrenderer.minecraft.batch.impl.ColoredTextureBatch
+import com.ferra13671.cometrenderer.minecraft.batch.impl.RoundedBlurBatch
+import com.ferra13671.cometrenderer.minecraft.batch.impl.RoundedRectBatch
+import com.ferra13671.cometrenderer.minecraft.batch.impl.RoundedTextureBatch
+import com.ferra13671.cometrenderer.minecraft.blur.BlurConfig
+import com.ferra13671.cometrenderer.minecraft.blur.BlurProvider
+import com.ferra13671.cometrenderer.minecraft.event.RenderHudCallback
+import com.ferra13671.cometrenderer.minecraft.font.TTFFont
+import com.ferra13671.gltextureutils.GLTexture
+import com.ferra13671.gltextureutils.TextureFiltering
+import com.ferra13671.gltextureutils.TextureWrapping
+import com.ferra13671.gltextureutils.atlas.TextureBorder
+import com.ferra13671.gltextureutils.loader.TextureLoaders
+import net.ccbluex.liquidbounce.features.module.ClientModule
+import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.utils.client.logger
+import net.ccbluex.liquidbounce.utils.client.mc
+import java.awt.Color
+import java.awt.Font
+import java.awt.GradientPaint
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
+
+/**
+ * Standalone proof-of-concept module for the HUD render port onto CometRenderer.
+ *
+ * Renders a "test card" exercising every CometRenderer 2D primitive (solid rect, multi-color
+ * gradient, rounded rect, gradient rounded rect, textured quad, rounded textured quad, supersampled
+ * text with shadow + colors, and frame blur).
+ *
+ * CometRenderer submits geometry on its OWN pipeline via [RenderHudCallback] (CRM renders into its
+ * own framebuffer before the GUI). The callback is registered once and gated by [running]; GL
+ * resources are created lazily on the render thread.
+ *
+ * ## Crisp, supersampled text
+ * CRM rasterizes glyphs into an atlas at the font's point size and draws each glyph at that size in
+ * the active coordinate space. Drawing in Minecraft's GUI-scaled space upscales the atlas by the GUI
+ * scale → blur. We instead drive CRM in **physical-pixel space** (CRMInstance scale = 1) and rasterize
+ * the font at `BASE_FONT_PX * guiScale * supersampling`, then draw each glyph quad scaled back down to
+ * `BASE_FONT_PX * guiScale` physical pixels. With linear texture filtering the oversized atlas is
+ * minified → smooth, antialiased text (SSAA). [TextBatch] can't do this (it draws atlas-size 1:1), so
+ * the glyphs are submitted manually via [ColoredTextureBatch]. Atlas size is clamped to bound RAM.
+ */
+object ModuleCometTest : ClientModule("CometTest", ModuleCategories.RENDER) {
+
+    private const val BASE_FONT_PX = 18
+
+    /** Hard cap on the rasterized font size so a high GUI scale × supersampling can't blow up the
+     *  glyph atlas. 256 px keeps a 256-glyph atlas around a 4096² texture (~64 MB) worst case. */
+    private const val MAX_FONT_PX = 256
+
+    // Layout values in unscaled GUI units; multiplied by the GUI scale at draw time.
+    private val originX by float("OriginX", 16f, 0f..400f)
+    private val originY by float("OriginY", 40f, 0f..400f)
+    private val cell by float("CellSize", 70f, 20f..200f)
+    private val gap by float("Gap", 10f, 0f..64f)
+    private val radius by float("Radius", 14f, 0f..48f)
+
+    /** Text SSAA factor on top of physical resolution. 8 ≈ reference quality; lower it if RAM matters. */
+    private val supersampling by int("TextSupersampling", 8, 1..8)
+
+    // Lazily created on the render thread once CometRenderer is fully initialized (first frame).
+    private var instance: CRMInstance? = null
+    private var font: TTFFont? = null
+    private var fontKey = 0
+    /** Divisor mapping atlas-size glyph metrics back to physical pixels (= effective supersample). */
+    private var fontDivisor = 1f
+    private var texture: GLTexture? = null
+    // Plain field (not `by lazy`): BlurProvider's constructor allocates GL framebuffers, so it may only
+    // be created on the render thread inside the callback below.
+    private var blurProvider: BlurProvider? = null
+    private var baseReady = false
+    private var resourcesFailed = false
+
+    init {
+        RenderHudCallback.EVENT.register(RenderHudCallback {
+            if (!running) {
+                return@RenderHudCallback
+            }
+
+            val crm = ensureResources() ?: return@RenderHudCallback
+
+            crm.setupUIMatrix()
+            try {
+                drawTestCard()
+            } catch (e: Throwable) {
+                logger.error("CometRenderer test draw failed", e)
+            } finally {
+                crm.restoreUIMatrix()
+            }
+        })
+    }
+
+    private fun uiScale() = mc.window.guiScale.toInt().coerceAtLeast(1)
+
+    /**
+     * Builds the CRM instance (physical-pixel space), demo texture and blur provider once, plus the
+     * supersampled font (rebuilt whenever GUI scale or the supersampling factor changes). Runs on the
+     * render thread inside [RenderHudCallback], where CometRenderer and its GL context are ready.
+     */
+    private fun ensureResources(): CRMInstance? {
+        if (resourcesFailed) {
+            return null
+        }
+
+        return try {
+            if (!baseReady) {
+                // scale = 1 → CRM's UI matrix is physical-pixel space (no GUI-scale upscaling of glyphs)
+                instance = CRMInstance { 1 }
+                texture = buildDemoTexture()
+                blurProvider = BlurProvider(BlurConfig.DEFAULT)
+                baseReady = true
+            }
+
+            val scale = uiScale()
+            val key = scale * 100 + supersampling
+            if (font == null || fontKey != key) {
+                val physicalPx = BASE_FONT_PX * scale
+                val atlasPx = (physicalPx * supersampling).coerceAtMost(MAX_FONT_PX)
+                // Keep all of our glyphs (chars 32..183) in a single atlas bucket.
+                font = TTFFont(Font("SansSerif", Font.PLAIN, atlasPx), 256)
+                fontDivisor = atlasPx.toFloat() / physicalPx
+                fontKey = key
+            }
+
+            instance
+        } catch (e: Throwable) {
+            resourcesFailed = true
+            logger.error("Failed to initialize CometRenderer test resources", e)
+            null
+        }
+    }
+
+    private fun drawTestCard() {
+        val s = uiScale()
+        val ox = originX * s
+        val oy = originY * s
+        val c = cell * s
+        val gp = gap * s
+        val r = radius * s
+        fun cellX(column: Int) = ox + column * (c + gp)
+
+        val blur = blurProvider
+        if (blur != null) {
+            // Capture the current frame so the blur batches below have something to sample.
+            blur.blurFrame()
+        }
+
+        // 0) Solid color rect — color is pushed through the shared shader color uniform.
+        BasicRectBatch {
+            CometRenderer.getShaderColor().setColor(RenderColor.of(Color.RED).toVector4f())
+        }
+            .rectSized(cellX(0), oy, c, c)
+            .build().tryDraw().close()
+
+        // 1) Per-corner multi-color gradient rect.
+        ColoredRectBatch()
+            .rectSized(
+                cellX(1), oy, c, c, RectColors(
+                    RenderColor.of(1f, 1f, 1f, 1f),
+                    RenderColor.of(1f, 0f, 0f, 1f),
+                    RenderColor.of(0f, 1f, 0f, 1f),
+                    RenderColor.of(0f, 0f, 1f, 1f),
+                )
+            )
+            .build().tryDraw().close()
+
+        // 2) Solid rounded rect, and 3) horizontal-gradient rounded rect.
+        RoundedRectBatch()
+            .rectSized(cellX(2), oy, c, c, r, RectColors.oneColor(RenderColor.of(Color.MAGENTA)))
+            .rectSized(
+                cellX(3), oy, c, c, r,
+                RectColors.horizontalGradient(RenderColor.of(Color.BLUE), RenderColor.of(Color.CYAN))
+            )
+            .build().tryDraw().close()
+
+        val tex = texture
+        if (tex != null) {
+            // 4) Textured quad.
+            BasicTextureBatch()
+                .setTexture(tex)
+                .rectSized(cellX(4), oy, c, c, TextureBorder(0f, 0f, 1f, 1f))
+                .build().tryDraw().close()
+
+            // 5) Rounded textured quad.
+            RoundedTextureBatch()
+                .setTexture(tex)
+                .rectSized(
+                    cellX(5), oy, c, c, r,
+                    RectColors.oneColor(RenderColor.WHITE), TextureBorder(0f, 0f, 1f, 1f)
+                )
+                .build().tryDraw().close()
+        }
+
+        // 6) Blur — basic and rounded, stacked in the next column (only if blur initialized).
+        if (blur != null) {
+            BasicBlurBatch(blur)
+                .rectSized(cellX(6), oy, c, c)
+                .build().tryDraw().close()
+
+            RoundedBlurBatch(blur)
+                .rectSized(cellX(6), oy + c + gp, c, c, r)
+                .build().tryDraw().close()
+        }
+
+        drawText(ox, oy + c + gp)
+    }
+
+    private fun drawText(x: Float, y: Float) {
+        val f = font ?: return
+        val div = fontDivisor
+        val lineH = f.textHeight / div
+
+        drawString(f, div, "LiquidBounce · CometRenderer", x, y, RenderColor.WHITE, shadow = false)
+        drawString(f, div, "text with shadow", x, y + lineH, RenderColor.of(Color.YELLOW), shadow = true)
+
+        // Colored segments (replaces the §-code demo now that we draw glyphs ourselves).
+        var cx = drawString(f, div, "colors: ", x, y + lineH * 2, RenderColor.WHITE, shadow = false)
+        cx = drawString(f, div, "A", cx, y + lineH * 2, RenderColor.of(Color.GREEN), shadow = false)
+        cx = drawString(f, div, "B", cx, y + lineH * 2, RenderColor.of(Color.CYAN), shadow = false)
+        cx = drawString(f, div, "C", cx, y + lineH * 2, RenderColor.of(Color.RED), shadow = false)
+        drawString(f, div, "D", cx, y + lineH * 2, RenderColor.of(Color.YELLOW), shadow = false)
+    }
+
+    /**
+     * Draws [text] glyph-by-glyph, scaling each glyph quad from atlas size down to physical size by
+     * [div] (the supersample factor) for smooth minified text. Glyphs are grouped per atlas texture
+     * into [ColoredTextureBatch]es. Returns the advanced x (physical px) for chaining colored runs.
+     */
+    private fun drawString(
+        f: TTFFont, div: Float, text: String, startX: Float, y: Float, color: RenderColor, shadow: Boolean
+    ): Float {
+        val batches = HashMap<GLTexture, ColoredTextureBatch>()
+        var x = startX
+
+        for (ch in text) {
+            val glyph = f.getGlyph(ch) ?: continue
+            val w = glyph.width() / div
+            val h = glyph.height() / div
+            val batch = batches.getOrPut(glyph.instance().texture) {
+                ColoredTextureBatch().setTexture(glyph.instance().texture)
+            }
+
+            if (shadow) {
+                batch.rectSized(x + 1f, y + 1f, w, h, RectColors.oneColor(RenderColor.BLACK), glyph.border())
+            }
+            batch.rectSized(x, y, w, h, RectColors.oneColor(color), glyph.border())
+
+            x += w
+        }
+
+        batches.values.forEach { it.build().tryDraw().close() }
+        return x
+    }
+
+    /** Generates an RGBA texture in-memory (gradient + border) so the texture primitives have
+     *  something to sample without bundling an image asset. Sized generously for high GUI scales. */
+    private fun buildDemoTexture(): GLTexture {
+        val size = 128
+        val image = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
+        val g = image.createGraphics()
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+        g.paint = GradientPaint(0f, 0f, Color(0x00, 0x80, 0xFF), size.toFloat(), size.toFloat(), Color(0x12, 0x12, 0x20))
+        g.fillRect(0, 0, size, size)
+        g.color = Color.WHITE
+        g.drawRect(0, 0, size - 1, size - 1)
+        g.font = Font("SansSerif", Font.BOLD, 56)
+        g.drawString("LB", 28, 84)
+        g.dispose()
+
+        return TextureLoaders.BUFFERED_IMAGE.createTextureBuilder()
+            .name("CometTest-demo")
+            .info(image)
+            .filtering(TextureFiltering.SMOOTH)
+            .wrapping(TextureWrapping.DEFAULT)
+            .build()
+    }
+
+}

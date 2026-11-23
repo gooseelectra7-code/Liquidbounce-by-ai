@@ -1,0 +1,19 @@
+name: Push files via git
+
+on:
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          repository: gooseelectra7-code/Liquidbounce-by-ai
+
+      - name: Add remote and push
+        run: |
+          git remote add local-origin /tmp/repo
+          # Or use the existing workflow to push files
+          echo "Files ready for CI build"

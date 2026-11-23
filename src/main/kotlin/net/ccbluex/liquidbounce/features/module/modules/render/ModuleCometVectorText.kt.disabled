@@ -1,0 +1,344 @@
+/*
+ * This file is part of LiquidBounce (https://github.com/CCBlueX/LiquidBounce)
+ *
+ * Copyright (c) 2015 - 2026 CCBlueX
+ *
+ * LiquidBounce is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * LiquidBounce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with LiquidBounce. If not, see <https://www.gnu.org/licenses/>.
+ */
+package net.ccbluex.liquidbounce.features.module.modules.render
+
+import com.ferra13671.cometrenderer.CometRenderer
+import com.ferra13671.cometrenderer.minecraft.CRM
+import com.ferra13671.cometrenderer.minecraft.CRMInstance
+import com.ferra13671.cometrenderer.minecraft.RenderColor
+import com.ferra13671.cometrenderer.minecraft.batch.AbstractPrimitiveBatch
+import com.ferra13671.cometrenderer.minecraft.batch.impl.BasicRectBatch
+import com.ferra13671.cometrenderer.minecraft.event.RenderHudCallback
+import com.ferra13671.cometrenderer.vertex.DrawMode
+import com.ferra13671.cometrenderer.vertex.format.VertexFormat
+import com.ferra13671.cometrenderer.vertex.mesh.Mesh
+import net.ccbluex.liquidbounce.features.module.ClientModule
+import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.render.comet.Earcut
+import net.ccbluex.liquidbounce.utils.client.logger
+import net.ccbluex.liquidbounce.utils.client.mc
+import java.awt.Color
+import java.awt.Font
+import java.awt.font.FontRenderContext
+import java.awt.geom.PathIterator
+
+/**
+ * Experimental: **vector text on CometRenderer** — no glyph atlas, no Minecraft font, no browser.
+ *
+ * Each glyph's outline is taken from a real `java.awt.Font` ([Font.createGlyphVector] →
+ * [java.awt.font.GlyphVector.getOutline]), flattened to polygon contours and triangulated by [Earcut]
+ * (which handles the holes in `o a e B R 8 %`). The cached triangles are scaled per draw and submitted
+ * as a raw `POSITION` triangle mesh, so text is fully resolution-independent and the per-glyph advance
+ * comes straight from the font metrics → letters never drift.
+ *
+ * Known limitation: raw triangle fill has no antialiasing, so edges look slightly jagged unless the
+ * framebuffer is multisampled — that's the trade-off of the pure-vector path vs SDF. Drawn in
+ * physical-pixel space (CRMInstance scale = 1) to maximize pixel density.
+ */
+object ModuleCometVectorText : ClientModule("CometVectorText", ModuleCategories.RENDER) {
+
+    /** Font size the outlines are tessellated at; glyphs are cached once here and scaled when drawn. */
+    private const val TESS_SIZE = 256
+    private const val FLATNESS = 0.3
+
+    private val originX by float("OriginX", 16f, 0f..400f)
+    private val originY by float("OriginY", 30f, 0f..400f)
+    private val fontSize by float("FontSize", 18f, 6f..96f)
+
+    private var instance: CRMInstance? = null
+    private var vectorFont: VectorFont? = null
+    private var ready = false
+    private var failed = false
+
+    init {
+        RenderHudCallback.EVENT.register(RenderHudCallback {
+            if (!running) {
+                return@RenderHudCallback
+            }
+            val crm = ensureResources() ?: return@RenderHudCallback
+
+            crm.setupUIMatrix()
+            try {
+                draw()
+            } catch (e: Throwable) {
+                logger.error("CometRenderer vector text draw failed", e)
+            } finally {
+                crm.restoreUIMatrix()
+            }
+        })
+    }
+
+    private fun uiScale() = mc.window.guiScale.toInt().coerceAtLeast(1)
+
+    private fun ensureResources(): CRMInstance? {
+        if (failed) return null
+        return try {
+            if (!ready) {
+                instance = CRMInstance { 1 } // physical-pixel space
+                vectorFont = VectorFont(Font("SansSerif", Font.PLAIN, TESS_SIZE))
+                ready = true
+            }
+            instance
+        } catch (e: Throwable) {
+            failed = true
+            logger.error("Failed to initialize CometRenderer vector font", e)
+            null
+        }
+    }
+
+    private fun draw() {
+        val f = vectorFont ?: return
+        val s = uiScale()
+        val x = originX * s
+        var y = originY * s
+        val px = fontSize * s
+
+        // DIAGNOSTIC: draw a WORKING BasicRectBatch rectangle as a control (bright cyan).
+        BasicRectBatch {
+            CometRenderer.getShaderColor().setColor(RenderColor.of(Color.CYAN).toVector4f())
+        }
+            .rectSized(x, y, 100f * s, 50f * s)
+            .build().tryDraw().close()
+
+        // DIAGNOSTIC: test TriangleBatch with explicit CCW winding (yellow triangle).
+        val testBatch = TriangleBatch(RenderColor.of(Color.YELLOW), 256)
+        val tx = x
+        val ty = y + 60f * s
+        // CCW winding: bottom-left, bottom-right, top-center
+        testBatch.triangle(tx, ty + 50f * s, tx + 100f * s, ty + 50f * s, tx + 50f * s, ty)
+        testBatch.build().tryDraw().close()
+
+        y += 120f * s
+        y = f.drawLine("LiquidBounce vector text", x, y, px, RenderColor.WHITE)
+        y = f.drawLine("Aligned: AVAWTo. iiimmm 0123456789", x, y, px, RenderColor.of(Color.CYAN))
+        y = f.drawLine("Holes: o a e B R d g p q 8 % & @", x, y, px + 4f * s, RenderColor.of(Color.YELLOW))
+        f.drawLine("Big & sharp", x, y, px * 3f, RenderColor.of(Color.MAGENTA))
+    }
+
+    /**
+     * Tessellates and caches glyph outlines from [font], and draws strings as scaled triangle meshes.
+     */
+    private class VectorFont(private val font: Font) {
+        private val frc = FontRenderContext(null, true, true)
+        private val lineMetrics = font.getLineMetrics("Ag", frc)
+        private val ascent = lineMetrics.ascent
+        private val lineHeight = lineMetrics.height
+        private val cache = HashMap<Char, Glyph>()
+
+        /** [tris] = flat `[x0,y0,x1,y1,x2,y2, ...]` triangle vertices in [TESS_SIZE]-px font space. */
+        private class Glyph(val tris: FloatArray, val advance: Float)
+
+        private fun glyph(ch: Char): Glyph = cache.getOrPut(ch) { tessellate(ch) }
+
+        private fun tessellate(ch: Char): Glyph {
+            val gv = font.createGlyphVector(frc, ch.toString())
+            val advance = gv.getGlyphMetrics(0).advanceX
+
+            // Flatten the outline into polygon contours.
+            val contours = ArrayList<DoubleArray>()
+            val cur = ArrayList<Double>()
+            val pi = gv.outline.getPathIterator(null, FLATNESS)
+            val seg = DoubleArray(6)
+            while (!pi.isDone) {
+                when (pi.currentSegment(seg)) {
+                    PathIterator.SEG_MOVETO -> {
+                        if (cur.size >= 6) contours.add(cur.toDoubleArray())
+                        cur.clear()
+                        cur.add(seg[0]); cur.add(seg[1])
+                    }
+                    PathIterator.SEG_LINETO -> {
+                        cur.add(seg[0]); cur.add(seg[1])
+                    }
+                    PathIterator.SEG_CLOSE -> {
+                        if (cur.size >= 6) contours.add(cur.toDoubleArray())
+                        cur.clear()
+                    }
+                }
+                pi.next()
+            }
+            if (cur.size >= 6) contours.add(cur.toDoubleArray())
+            if (contours.isEmpty()) return Glyph(FloatArray(0), advance)
+
+            val n = contours.size
+            val areas = DoubleArray(n) { Math.abs(shoelace(contours[it])) }
+            val isHole = BooleanArray(n) { i ->
+                var contained = 0
+                for (j in 0 until n) {
+                    if (j != i && pointInPolygon(contours[i][0], contours[i][1], contours[j])) contained++
+                }
+                contained % 2 == 1
+            }
+
+            val tris = ArrayList<Float>()
+            for (i in 0 until n) {
+                if (isHole[i]) continue
+
+                // Holes whose smallest containing outer is i.
+                val data = ArrayList<Double>(contours[i].size)
+                contours[i].forEach { data.add(it) }
+                val holeIndices = ArrayList<Int>()
+                var vertCount = contours[i].size / 2
+
+                for (h in 0 until n) {
+                    if (!isHole[h] || !pointInPolygon(contours[h][0], contours[h][1], contours[i])) continue
+                    var smallest = true
+                    for (o in 0 until n) {
+                        if (o == i || isHole[o]) continue
+                        if (areas[o] < areas[i] && pointInPolygon(contours[h][0], contours[h][1], contours[o])) {
+                            smallest = false
+                            break
+                        }
+                    }
+                    if (!smallest) continue
+                    holeIndices.add(vertCount)
+                    contours[h].forEach { data.add(it) }
+                    vertCount += contours[h].size / 2
+                }
+
+                val arr = data.toDoubleArray()
+                val idx = Earcut.earcut(arr, holeIndices.toIntArray(), 2)
+                var k = 0
+                while (k < idx.size) {
+                    val a = idx[k] * 2
+                    val b = idx[k + 1] * 2
+                    val c = idx[k + 2] * 2
+                    tris.add(arr[a].toFloat()); tris.add(arr[a + 1].toFloat())
+                    tris.add(arr[b].toFloat()); tris.add(arr[b + 1].toFloat())
+                    tris.add(arr[c].toFloat()); tris.add(arr[c + 1].toFloat())
+                    k += 3
+                }
+            }
+
+            return Glyph(tris.toFloatArray(), advance)
+        }
+
+        /** Draws [text] at physical pixel size [px], returns the next line's top Y. */
+        fun drawLine(text: String, startX: Float, topY: Float, px: Float, color: RenderColor): Float {
+            val scale = px / TESS_SIZE
+            val baseY = topY + ascent * scale
+
+            var triangleCount = 0
+            for (ch in text) triangleCount += glyph(ch).tris.size / 6
+
+            // DIAGNOSTIC: log triangle count for first glyph to verify tessellation works.
+            if (text.isNotEmpty()) {
+                val firstGlyph = glyph(text[0])
+                logger.info("VectorFont: '${text[0]}' → ${firstGlyph.tris.size / 6} triangles, advance=${firstGlyph.advance}")
+            }
+
+            if (triangleCount == 0) return topY + lineHeight * scale
+
+            // 4 verts × 12 bytes (vertices) + index buffer + overhead. Size generously to avoid
+            // silent allocator overflow; memory churn is irrelevant for this test module.
+            val batch = TriangleBatch(color, triangleCount * 128 + 8192)
+            var pen = startX
+            for (ch in text) {
+                val g = glyph(ch)
+                val t = g.tris
+                var k = 0
+                while (k < t.size) {
+                    batch.triangle(
+                        pen + t[k] * scale, baseY + t[k + 1] * scale,
+                        pen + t[k + 2] * scale, baseY + t[k + 3] * scale,
+                        pen + t[k + 4] * scale, baseY + t[k + 5] * scale,
+                    )
+                    k += 6
+                }
+                pen += g.advance * scale
+            }
+            batch.build().tryDraw().close()
+
+            return topY + lineHeight * scale
+        }
+
+        private fun shoelace(c: DoubleArray): Double {
+            var sum = 0.0
+            val pts = c.size / 2
+            var j = pts - 1
+            for (i in 0 until pts) {
+                sum += (c[j * 2] - c[i * 2]) * (c[i * 2 + 1] + c[j * 2 + 1])
+                j = i
+            }
+            return sum
+        }
+
+        private fun pointInPolygon(px: Double, py: Double, c: DoubleArray): Boolean {
+            var inside = false
+            val pts = c.size / 2
+            var j = pts - 1
+            for (i in 0 until pts) {
+                val xi = c[i * 2]; val yi = c[i * 2 + 1]
+                val xj = c[j * 2]; val yj = c[j * 2 + 1]
+                if (((yi > py) != (yj > py)) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+                    inside = !inside
+                }
+                j = i
+            }
+            return inside
+        }
+    }
+
+    /** Single-color raw triangle mesh on CometRenderer's POSITION program.
+     *
+     *  Uses [DrawMode.QUADS], not TRIANGLES: in CometRenderer only the QUADS draw mode carries an
+     *  index generator (4 verts → indices 0,1,2, 2,3,0), while TRIANGLES has none and renders nothing.
+     *  Each triangle is therefore submitted as a degenerate quad (a, b, c, c): the generator expands it
+     *  to a,b,c (the real triangle) + c,c,a (zero-area, invisible). */
+    private class TriangleBatch(color: RenderColor, allocBytes: Int) :
+        AbstractPrimitiveBatch(Mesh.builder(allocBytes, DrawMode.QUADS, VertexFormat.POSITION)) {
+
+        init {
+            // Color must be set BEFORE draw() via preDrawRunnable (same pattern as BasicRectBatch).
+            preDrawRunnable = Runnable {
+                CometRenderer.getShaderColor().setColor(color.toVector4f())
+            }
+        }
+
+        fun triangle(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float): TriangleBatch {
+            // Normalize to front-facing winding (negative cross, like BasicRectBatch) so triangles
+            // aren't dropped by backface culling. Earcut emits arbitrary orientation; flip if needed.
+            val cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+            if (cross > 0f) {
+                // wrong winding → swap b and c
+                meshBuilder.vertex(ax, ay, 0f)
+                meshBuilder.vertex(cx, cy, 0f)
+                meshBuilder.vertex(bx, by, 0f)
+                meshBuilder.vertex(bx, by, 0f)
+            } else {
+                meshBuilder.vertex(ax, ay, 0f)
+                meshBuilder.vertex(bx, by, 0f)
+                meshBuilder.vertex(cx, cy, 0f)
+                meshBuilder.vertex(cx, cy, 0f) // 4th vertex: degenerate, completes the quad
+            }
+            return this
+        }
+
+        override fun draw() {
+            if (mesh == null) {
+                logger.error("TriangleBatch.draw(): mesh is NULL after build()")
+                return
+            }
+            logger.info("TriangleBatch.draw(): mesh non-null, calling CometRenderer.draw()")
+            CometRenderer.setCurrentProgram(CRM.getPrograms().POSITION)
+            CometRenderer.applyShaderColorUniform()
+            CRM.applyMatrixUniform()
+            CometRenderer.draw(mesh, false)
+        }
+    }
+}

@@ -1,0 +1,6 @@
+@echo off
+echo Testing Java path...
+where java
+echo Testing Java directly...
+"C:\Program Files\Java\jdk-25.0.4\bin\java.exe" -version
+echo Java test completed with errorlevel %ERRORLEVEL%

@@ -1,0 +1,270 @@
+/*
+ * Orbit HUD — the design, authored 1:1 in native screen pixels on a 1920×1080 stage so every
+ * number here transfers straight into the native renderer.
+ *
+ * The style comes from the ring target card: a flat near-black card, 10 px corners, a one-pixel
+ * hairline, real glass behind it, and one accent that only ever appears on the thing you should be
+ * looking at. A ring is used where a ring earns its place — the target's health — everything else
+ * is a 3 px bar or plain type, because a HUD you actually play with has to be read at a glance.
+ *
+ * Colour rules: white for values, grey for labels, the health grade (red → gold → green) for any
+ * fraction, gold for anything running out.
+ */
+
+@font-face {
+  font-family: "InterHud";
+  src: url("../fonts/Inter-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-display: block;
+}
+@font-face {
+  font-family: "InterHud";
+  src: url("../fonts/Inter-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-display: block;
+}
+
+:root {
+  --card: rgba(12, 13, 18, 0.86);
+  --hairline: rgba(255, 255, 255, 0.09);
+  --sheen: rgba(255, 255, 255, 0.05);
+  --text: #f0f1f6;
+  --dim: #9096a8;
+  --faint: #6c7183;
+  --accent: #8f8ae8;
+  --gold: #f2c55c;
+  --low: #e05555;
+  --high: #7fcb8f;
+  --radius: 10px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #05060a;
+  font-family: "InterHud", system-ui, sans-serif;
+  font-weight: 500;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* the whole page is the frame — nothing else on screen */
+.frame { position: fixed; inset: 0; display: grid; place-items: center; overflow: hidden; }
+.stage {
+  position: relative; width: 1920px; height: 1080px; flex: none;
+  transform-origin: center center; user-select: none;
+}
+.scene { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.crosshair { position: absolute; left: 50%; top: 50%; }
+.crosshair::before, .crosshair::after {
+  content: ""; position: absolute; background: rgba(255, 255, 255, 0.8);
+}
+.crosshair::before { left: -1px; top: -9px; width: 2px; height: 18px; }
+.crosshair::after { left: -9px; top: -1px; width: 18px; height: 2px; }
+
+/* ── the card ────────────────────────────────────────────────────────────── */
+.hud {
+  position: absolute;
+  background: var(--card);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.hud::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 16px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: linear-gradient(var(--sheen), transparent);
+  pointer-events: none;
+}
+
+.hud .head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 12px 7px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--dim);
+}
+.hud .head b { color: var(--faint); font-weight: 600; }
+.hud .head + .row { border-top: 1px solid var(--hairline); }
+
+/* rows share one rhythm across every panel */
+.hud .row {
+  display: flex; align-items: center; gap: 8px;
+  height: 26px; padding: 0 12px;
+  font-size: 12.5px; font-weight: 600;
+}
+.hud .row img { width: 15px; height: 15px; image-rendering: pixelated; flex: none; }
+
+/* ── watermark ───────────────────────────────────────────────────────────── */
+.watermark {
+  top: 16px; left: 16px; height: 38px;
+  display: flex; align-items: center; gap: 10px; padding: 0 12px;
+  font-size: 12.5px;
+}
+.watermark .mark { width: 20px; height: 20px; display: grid; place-items: center; }
+.watermark .mark img { width: 18px; height: 18px; }
+.watermark .name { font-weight: 600; letter-spacing: -0.01em; }
+.watermark .pair { display: flex; align-items: baseline; gap: 3px; }
+.watermark .pair b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.watermark .pair em {
+  font-style: normal; font-size: 10px; font-weight: 600; color: var(--faint);
+  letter-spacing: 0.04em;
+}
+.div { width: 1px; height: 14px; background: var(--hairline); }
+
+/* ── stock counters ──────────────────────────────────────────────────────── */
+.stock { top: 16px; right: 16px; width: 212px; padding: 5px 0; }
+.stock .qty { color: var(--gold); font-variant-numeric: tabular-nums; }
+.stock .what { color: var(--text); font-weight: 500; font-size: 12px; }
+
+/* ── module list ─────────────────────────────────────────────────────────── */
+.modules { top: 174px; right: 16px; width: 186px; padding-bottom: 5px; }
+.modules .row { justify-content: space-between; gap: 10px; }
+.modules .row span { color: var(--text); }
+.modules .row em { font-style: normal; font-size: 11px; font-weight: 500; color: var(--faint); }
+.modules .row:nth-child(2) span { color: var(--accent); }
+
+/* ── keybinds ────────────────────────────────────────────────────────────── */
+.binds { top: 300px; left: 16px; width: 214px; padding-bottom: 5px; }
+.binds .row span { flex: 1; }
+.binds kbd {
+  font: inherit; font-size: 10.5px; font-weight: 600; color: var(--dim);
+  padding: 2px 6px; border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--hairline);
+}
+
+/* ── effects ─────────────────────────────────────────────────────────────── */
+.potions { top: 534px; right: 16px; width: 214px; padding-bottom: 5px; }
+.potions .row span { flex: 1; font-weight: 500; }
+.potions .row span b { font-weight: 600; color: var(--dim); }
+.potions time { font-size: 12px; font-weight: 600; color: var(--dim); font-variant-numeric: tabular-nums; }
+.potions .row.low time { color: var(--gold); }
+
+/* ── target ──────────────────────────────────────────────────────────────── */
+.target {
+  left: calc(50% + 74px); top: calc(50% + 18px);
+  width: 300px; height: 84px; padding: 10px;
+  display: flex; align-items: center; gap: 10px;
+}
+.target .face {
+  width: 64px; height: 64px; border-radius: 9px; overflow: hidden; flex: none;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.14);
+}
+.target .face img { width: 100%; height: 100%; image-rendering: pixelated; }
+.target .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+.target .line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.target .nick {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.target .dist { font-size: 11px; font-weight: 600; color: var(--faint); font-variant-numeric: tabular-nums; }
+.target .bar { height: 3px; border-radius: 2px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
+.target .bar i {
+  display: block; height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, var(--gold), var(--high));
+}
+.target .gear { display: flex; gap: 3px; }
+.target .gear img { width: 18px; height: 18px; image-rendering: pixelated; }
+.target .hp { position: relative; width: 52px; height: 52px; flex: none; }
+.target .hp svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.target .hp circle { fill: none; stroke-linecap: round; }
+.target .hp .track { stroke: rgba(0, 0, 0, 0.5); stroke-width: 6; }
+.target .hp .arc { stroke: var(--high); stroke-width: 6; stroke-dasharray: 195; stroke-dashoffset: 74; }
+.target .hp .arc.glow { filter: blur(3px); opacity: 0.5; stroke-width: 9; }
+.target .hp b {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+
+/* ── toasts ──────────────────────────────────────────────────────────────── */
+.toasts {
+  left: 50%; top: calc(50% + 210px); transform: translateX(-50%);
+  background: none; border: 0; box-shadow: none; backdrop-filter: none;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.toasts::before { display: none; }
+.toast {
+  display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 12px;
+  background: var(--card); border: 1px solid var(--hairline); border-radius: 8px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  font-size: 12.5px;
+}
+.toast i { width: 3px; height: 12px; border-radius: 2px; background: var(--accent); }
+.toast.on i { background: var(--high); }
+.toast.off i { background: var(--low); }
+.toast .who { font-weight: 600; }
+.toast .msg { color: var(--dim); font-weight: 500; }
+
+/* ── armour ──────────────────────────────────────────────────────────────── */
+.armour { right: 16px; bottom: 16px; width: 262px; padding: 5px 0; }
+.armour .row { height: 28px; gap: 9px; }
+.armour .row span { flex: 1; font-weight: 500; font-size: 12px; white-space: nowrap; }
+.armour .row b { font-size: 11.5px; font-weight: 600; color: var(--faint); font-variant-numeric: tabular-nums; }
+.armour .row .bar {
+  flex: none; width: 44px; height: 3px; border-radius: 2px;
+  background: rgba(0, 0, 0, 0.5); overflow: hidden;
+}
+.armour .row .bar i { display: block; height: 100%; border-radius: 2px; background: var(--high); }
+.armour .row.warn .bar i { background: var(--gold); }
+.armour .row.warn b { color: var(--gold); }
+
+/* ── vitals + hotbar ─────────────────────────────────────────────────────── */
+.vitals {
+  left: 50%; bottom: 90px; transform: translateX(-50%);
+  height: 42px; padding: 0 14px; display: flex; align-items: center; gap: 18px;
+}
+.vitals .stat { display: flex; align-items: center; gap: 7px; }
+.vitals em {
+  font-style: normal; font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--faint);
+}
+.vitals b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 18px; }
+.vitals .bar { width: 54px; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, 0.5); overflow: hidden; }
+.vitals .bar i { display: block; height: 100%; border-radius: 2px; }
+.vitals .hp .bar i { background: var(--high); }
+.vitals .food .bar i { background: #d89e48; }
+.vitals .armor .bar i { background: #96a8d6; }
+.vitals .xp .bar i { background: #7ed32f; }
+
+.hotbar {
+  left: 50%; bottom: 16px; transform: translateX(-50%);
+  height: 58px; padding: 7px; display: flex; align-items: center; gap: 4px;
+}
+.hotbar .gap { width: 8px; }
+.hotbar .slot {
+  position: relative; width: 40px; height: 40px; border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3); display: grid; place-items: center;
+}
+.hotbar .slot img { width: 26px; height: 26px; image-rendering: pixelated; }
+.hotbar .slot span {
+  position: absolute; right: 4px; bottom: 2px;
+  font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.hotbar .slot .dura {
+  position: absolute; left: 6px; bottom: 5px; height: 2px; border-radius: 1px;
+  background: var(--high);
+}
+.hotbar .slot.on { background: rgba(255, 255, 255, 0.08); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.hotbar .slot.off { background: rgba(0, 0, 0, 0.42); }
+
+/* ── info ────────────────────────────────────────────────────────────────── */
+.info {
+  left: 16px; bottom: 16px; height: 38px;
+  display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 12.5px;
+}
+.info .tag {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--dim);
+}
+.info .pair { display: flex; align-items: baseline; gap: 5px; }
+.info .pair em {
+  font-style: normal; font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--faint);
+}
+.info .pair b { font-weight: 600; font-variant-numeric: tabular-nums; }

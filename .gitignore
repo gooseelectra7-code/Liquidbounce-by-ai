@@ -1,0 +1,34 @@
+.idea/*
+!.idea/copyright/
+!.idea/codeInsightSettings.xml
+*.iml
+*.ipr
+*.iws
+/bin/
+/.settings/
+/.gradle/
+/build/
+/run/
+/mcef/
+/logs/
+/.kotlin/
+.DS_Store
+*.log
+/.fabric/
+
+# Build artifacts anywhere (incl. CometRenderer-main subproject)
+build/
+.gradle/
+.kotlin/
+bin/
+out/
+
+# Node / web theme
+node_modules/
+
+# Bundled archive (redundant: extracted source is in CometRenderer-main/)
+/CometRenderer-main.zip
+
+# Decompiled reference client (competitor jar sources) - local research only, ~925 MB
+/rockstar-client-src/
+.claude/settings.local.json

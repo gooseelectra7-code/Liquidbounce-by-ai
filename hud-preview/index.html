@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hud2 — превью</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <img src="assets/logo.png" alt="">
+    <div>
+      <h1>Hud2</h1>
+      <p>покадровое превью HUD — та же геометрия, те же ассеты, что в игре</p>
+    </div>
+  </div>
+  <div class="meta">
+    <a href="orbit.html" style="color:#a8a3f5;text-decoration:none">Orbit — новый дизайн →</a>
+    <span id="metaScale">1920×1080 · guiScale 2</span>
+    <span id="metaFps">—</span>
+  </div>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="frame" id="frame">
+      <canvas id="hud" width="1920" height="1080"></canvas>
+    </div>
+    <p class="hint">Наведи курсор на кадр — цель начнёт получать урон. Клавиши <b>W A S D</b>, <b>Space</b>, ЛКМ/ПКМ работают по-настоящему и уходят в Keystrokes.</p>
+  </section>
+
+  <aside class="panel">
+    <div class="group">
+      <h2>Стиль</h2>
+      <div class="seg" data-bind="style">
+        <button data-value="classic" class="on">Classic</button>
+        <button data-value="leet">Leet</button>
+      </div>
+      <div class="seg" data-bind="lang">
+        <button data-value="ru" class="on">Русский</button>
+        <button data-value="en">English</button>
+      </div>
+      <label class="row"><input type="checkbox" id="optBlur" checked><span>Блюр под панелями</span></label>
+      <label class="row"><input type="checkbox" id="optShadow" checked><span>Тени панелей</span></label>
+    </div>
+
+    <div class="group">
+      <h2>TargetHud</h2>
+      <div class="seg" data-bind="targetMode">
+        <button data-value="glass" class="on">Glass</button>
+        <button data-value="dimasik">Dimasik</button>
+        <button data-value="ring">Ring</button>
+      </div>
+      <label class="slider"><span>Здоровье цели <b id="hpValue">17.5</b></span>
+        <input type="range" id="targetHp" min="0" max="20" step="0.5" value="17.5"></label>
+      <label class="slider"><span>Абсорбция <b id="absValue">0</b></span>
+        <input type="range" id="targetAbs" min="0" max="8" step="0.5" value="0"></label>
+      <button class="action" id="hitTarget">Ударить цель</button>
+    </div>
+
+    <div class="group">
+      <h2>События</h2>
+      <button class="action" id="popTotem">Тотем-поп</button>
+      <button class="action" id="toggleModule">Тоггл модуля</button>
+      <button class="action" id="killEnemy">Убийство</button>
+    </div>
+
+    <div class="group">
+      <h2>Элементы</h2>
+      <div class="checks" id="elementToggles"></div>
+    </div>
+  </aside>
+</main>
+
+<script src="js/paint.js"></script>
+<script src="js/state.js"></script>
+<script src="js/elements.js"></script>
+<script src="js/targethud.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+name: Trigger CI Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for trigger'
+        required: false
+        default: 'Manual CI trigger after git setup'
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create a dummy commit
+        run: |
+          echo "# CI Trigger - ${{ github.event.inputs.reason }}" > TRIGGER.md
+          git config user.name "CI Bot"
+          git config user.email "ci@example.com"
+          git add TRIGGER.md
+          git commit -m "ci: trigger build - ${{ github.event.inputs.reason }}"
+          git push
+      
+      - name: Wait for build
+        run: echo "Build should start automatically on push"

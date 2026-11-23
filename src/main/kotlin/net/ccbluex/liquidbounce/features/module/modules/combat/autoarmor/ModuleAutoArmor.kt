@@ -1,0 +1,162 @@
+/*
+ * This file is part of LiquidBounce (https://github.com/CCBlueX/LiquidBounce)
+ *
+ * Copyright (c) 2015 - 2026 CCBlueX
+ *
+ * LiquidBounce is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * LiquidBounce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with LiquidBounce. If not, see <https://www.gnu.org/licenses/>.
+ */
+package net.ccbluex.liquidbounce.features.module.modules.combat.autoarmor
+
+import net.ccbluex.liquidbounce.config.types.group.ToggleableValueGroup
+import net.ccbluex.liquidbounce.event.events.ScheduleInventoryActionEvent
+import net.ccbluex.liquidbounce.event.handler
+import net.ccbluex.liquidbounce.features.module.ClientModule
+import net.ccbluex.liquidbounce.features.module.ModuleCategories
+import net.ccbluex.liquidbounce.features.module.modules.combat.autoarmor.AutoArmorSaveArmor.durabilityThreshold
+import net.ccbluex.liquidbounce.features.module.modules.combat.autoarmor.ModuleAutoArmor.performMoveOrHotbarClick
+import net.ccbluex.liquidbounce.utils.inventory.ArmorItemSlot
+import net.ccbluex.liquidbounce.utils.inventory.HotbarItemSlot
+import net.ccbluex.liquidbounce.utils.inventory.InventoryAction
+import net.ccbluex.liquidbounce.utils.inventory.InventoryManager
+import net.ccbluex.liquidbounce.utils.inventory.PlayerInventoryConstraints
+import net.ccbluex.liquidbounce.utils.inventory.hasInventorySpace
+import net.ccbluex.liquidbounce.utils.item.armor.ArmorEvaluation
+import net.ccbluex.liquidbounce.utils.item.armor.ArmorPiece
+import net.ccbluex.liquidbounce.utils.kotlin.Priority
+import net.minecraft.world.item.Items
+import net.minecraft.world.item.enchantment.EnchantmentEffectComponents
+import net.minecraft.world.item.enchantment.EnchantmentHelper
+
+/**
+ * AutoArmor module
+ *
+ * Automatically puts on the best armor.
+ */
+object ModuleAutoArmor : ClientModule("AutoArmor", ModuleCategories.COMBAT) {
+
+    val inventoryConstraints = tree(PlayerInventoryConstraints())
+
+    /**
+     * Should the module use the hotbar to equip armor pieces?
+     * If disabled, it will only use inventory moves.
+     */
+    object UseHotbar : ToggleableValueGroup(this, "Hotbar", true) {
+        /**
+         * Defines whether the [UseHotbar] option supports the armor swap from MC 1.19.4+.
+         */
+        val canSwapArmor by boolean("CanSwapArmor", false)
+    }
+
+    init {
+        tree(UseHotbar)
+        tree(AutoArmorSaveArmor)
+    }
+
+    @Suppress("unused")
+    private val scheduleHandler = handler<ScheduleInventoryActionEvent> { event ->
+        if (player.isSpectator) {
+            return@handler
+        }
+
+        // Filter out already equipped armor pieces
+        val durabilityThreshold = if (AutoArmorSaveArmor.enabled) durabilityThreshold else Int.MIN_VALUE
+
+        val armorToEquip = ArmorEvaluation
+            .findBestArmorPieces(durabilityThreshold = durabilityThreshold)
+            .values.filterNotNull().filter { !it.isAlreadyEquipped }
+
+        for (armorPiece in armorToEquip) {
+            event.schedule(
+                inventoryConstraints,
+                equipArmorPiece(armorPiece) ?: continue,
+                Priority.IMPORTANT_FOR_PLAYER_LIFE
+            )
+        }
+    }
+
+    /**
+     * Tries to move the given armor piece in the target slot in the inventory. There are two possible behaviors:
+     * 1. If there is no free space in the target slot, it will make space in that slot (see [performMoveOrHotbarClick])
+     * 2. If there is free space, it will move the armor piece there
+     *
+     * @return false if a move was not possible, true if a move occurred
+     */
+    private fun equipArmorPiece(armorPiece: ArmorPiece): InventoryAction? {
+        val stackInArmor = player.inventory.getItem(armorPiece.inventorySlot)
+
+        if (stackInArmor.item == Items.ELYTRA) {
+            return null
+        }
+
+        // A worn piece with Curse of Binding cannot be taken off outside creative (`ArmorSlot.mayPickup`, `:56-61` in
+        // 26.1.2), so every click on it - quick move, throw or swap - is refused by the client's own prediction as
+        // well as by the server (`Slot.tryRemove`, `:99-100`). The packet still goes out
+        // (`MultiPlayerGameMode.handleContainerInput` sends whatever the click changed), the inventory does not
+        // change, and the next cycle would schedule the same click again with the inventory held open.
+        if (!player.isCreative &&
+            EnchantmentHelper.has(stackInArmor, EnchantmentEffectComponents.PREVENT_ARMOR_CHANGE)
+        ) {
+            return null
+        }
+
+        return performMoveOrHotbarClick(armorPiece, isInArmorSlot = !stackInArmor.isEmpty)
+    }
+
+    /**
+     * Central move-function of this module. There are following options:
+     * 1. If the slot is in the hotbar, we do a right-click on it (if possible)
+     * 2. If the slot is in inventory, we shift+left click it
+     * 3. If the slot is an armor slot and the replacement is in the hotbar (or the offhand on 1.16+), we press its
+     * number key over the armor slot: ONE click swaps the two pieces.
+     * 4. If the slot is an armor slot otherwise and there is free space in inventory, we shift+left click it otherwise
+     * throw it out.
+     *
+     * @param isInArmorSlot True if the slot is an armor slot.
+     * @return True if a move occurred.
+     */
+    private fun performMoveOrHotbarClick(
+        armorPiece: ArmorPiece,
+        isInArmorSlot: Boolean
+    ): InventoryAction {
+        val inventorySlot = armorPiece.itemSlot
+        val armorPieceSlot = if (isInArmorSlot) ArmorItemSlot(armorPiece.slotType) else inventorySlot
+
+        val canTryHotbarMove = UseHotbar.enabled &&
+            !InventoryManager.isInventoryOpen && (!isInArmorSlot || UseHotbar.canSwapArmor)
+
+        if (inventorySlot is HotbarItemSlot && canTryHotbarMove) {
+            return InventoryAction.UseItem(inventorySlot, this)
+        }
+
+        // Replacing a worn piece from the hotbar was two actions: take the worn one off (a quick move - or a THROW
+        // when the inventory is full, i.e. the old piece was dropped on the ground), then put the new one on. A `SWAP`
+        // click on the armour slot with the hotbar slot's button trades them in place: the source is the hotbar
+        // stack, the worn piece must be pickable (the binding guard in [equipArmorPiece]) and the armour slot must
+        // accept the new one (`AbstractContainerMenu.doClick`, `:499-511`; `ArmorSlot.mayPlace` =
+        // `isEquippableInSlot`, `:46-48`). The old piece lands in the hotbar slot.
+        if (isInArmorSlot && inventorySlot is HotbarItemSlot && inventorySlot.canBeSwapTarget) {
+            return InventoryAction.Click.performSwap(screen = null, from = armorPieceSlot, to = inventorySlot)
+        }
+
+        // Should the item be just thrown out of the inventory
+        val shouldThrow = isInArmorSlot && !hasInventorySpace()
+
+        return if (shouldThrow) {
+            InventoryAction.Click.performThrow(screen = null, armorPieceSlot)
+        } else {
+            InventoryAction.Click.performQuickMove(screen = null, armorPieceSlot)
+        }
+    }
+
+}

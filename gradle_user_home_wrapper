@@ -1,0 +1,17 @@
+#!/bin/bash
+# Alternative build script using direct Gradle invocation
+# This script uses the locally extracted Gradle distribution
+
+JAVA_HOME="/c/Program Files/Java/jdk-25.0.4"
+GRADLE_DIST="/c/Users/SYLVIA/.gradle/wrapper/dists/gradle-9.7.1-bin/1w1c7tv4s851m17nbqdsro2tv/gradle-9.7.1"
+PROJECT_DIR="/c/Users/SYLVIA/Desktop/LBnew-main"
+
+cd "$PROJECT_DIR"
+
+# Build classpath from gradle installation
+CP="$GRADLE_DIST/lib/*"
+
+# Run Gradle with proper classpath
+"$JAVA_HOME/bin/java.exe" -cp "$CP" org.gradle.launcher.GradleMain build -x detekt -x test --console=plain
+
+echo "Build completed. Check build/libs/ for output."

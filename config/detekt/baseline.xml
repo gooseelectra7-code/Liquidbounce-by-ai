@@ -1,0 +1,96 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>BracesOnIfStatements:ModuleAutoCrystal.kt:ModuleAutoCrystal$else</ID>
+    <ID>BracesOnIfStatements:ModuleAutoCrystal.kt:ModuleAutoCrystal$if</ID>
+    <ID>BracesOnIfStatements:MovementHelper.kt:if</ID>
+    <ID>CognitiveComplexMethod:BlockExtensions.kt:fun Block?.isInteractable: Boolean</ID>
+    <ID>CognitiveComplexMethod:CommandManager.kt:CommandManager$@ScriptApiRequired @JvmName("execute") fun execute</ID>
+    <ID>CognitiveComplexMethod:Earcut.kt:Earcut$private fun findHoleBridge: Node?</ID>
+    <ID>CognitiveComplexMethod:GraphSearch.kt:fun &lt;T> aStarBestEffort: BestEffortPath&lt;T>?</ID>
+    <ID>CognitiveComplexMethod:ModuleAutoCrystal.kt:ModuleAutoCrystal$private fun findBestCrystal: EndCrystal?</ID>
+    <ID>CognitiveComplexMethod:ModuleAutoCrystal.kt:ModuleAutoCrystal$private fun findBestObsidianPos: BlockPos?</ID>
+    <ID>CognitiveComplexMethod:ModuleAutoCrystal.kt:ModuleAutoCrystal$private fun findBestPlacePos: BlockPos?</ID>
+    <ID>CognitiveComplexMethod:ModuleAutoCrystal.kt:ModuleAutoCrystal$private fun findUnderminePos: BlockPos?</ID>
+    <ID>CognitiveComplexMethod:ModuleHud2.kt:ModuleHud2$@Suppress("LongParameterList", "detekt:LongMethod") private fun drawGlassPanel</ID>
+    <ID>CognitiveComplexMethod:ModuleHud2.kt:ModuleHud2.EffectsHud$@Suppress("LongParameterList") private fun submitRowFill</ID>
+    <ID>CognitiveComplexMethod:ModuleHud2.kt:ModuleHud2.ScoreboardHud$private fun parseLegacy: List&lt;Run></ID>
+    <ID>CognitiveComplexMethod:ModuleHud2.kt:ModuleHud2.TargetHud$@Suppress("LongParameterList") private fun submitItems</ID>
+    <ID>CognitiveComplexMethod:ModuleHud2.kt:ModuleHud2.TargetHud$@Suppress("LongParameterList", "detekt:LongMethod") private fun submitHealthBar</ID>
+    <ID>CognitiveComplexMethod:ModuleItemBind.kt:ModuleItemBind$private suspend fun execute</ID>
+    <ID>CognitiveComplexMethod:ModuleKillAura.kt:ModuleKillAura$private fun findRotation: RotationWithVector?</ID>
+    <ID>CognitiveComplexMethod:PathCalculator.kt:PathCalculator$private fun buildNeighbors: Iterable&lt;WeightedEdge&lt;PathNode>></ID>
+    <ID>CognitiveComplexMethod:PathManager.kt:PathManager$private fun onPathReady</ID>
+    <ID>CognitiveComplexMethod:PathManager.kt:PathManager$private fun startCalculation</ID>
+    <ID>CognitiveComplexMethod:PathSmoother.kt:PathSmoother$fun smooth: List&lt;PathSegment></ID>
+    <ID>CognitiveComplexMethod:PlacementRenderHandler.kt:PlacementRenderHandler$fun render</ID>
+    <ID>CognitiveComplexMethod:StochasticAngleSmooth.kt:StochasticAngleSmooth$override fun process: Rotation</ID>
+    <ID>CognitiveComplexMethod:WatermarkFont.kt:WatermarkFont$@Suppress("detekt:LongMethod") private fun buildAtlas: Atlas</ID>
+    <ID>CognitiveComplexMethod:extensions.kt:fun Task.getContributors: List&lt;String></ID>
+    <ID>ComplexCondition:Earcut.kt:Earcut$locallyInside(p, hole) &amp;&amp; (tan &lt; tanMin || (tan == tanMin &amp;&amp; (p.x > m!!.x || (p.x == m.x &amp;&amp; sectorContainsSector(m, p)))))</ID>
+    <ID>ComplexCondition:MovementHelper.kt:!isPassable(BlockPos(src.x + dx, src.y, src.z)) || !isPassable(BlockPos(src.x, src.y, src.z + dz)) || !isPassable(BlockPos(src.x + dx, src.y, src.z + dz)) || // head clearance at orthogonal corners too !isBlockPassable(BlockPos(src.x + dx, src.y + 1, src.z)) || !isBlockPassable(BlockPos(src.x, src.y + 1, src.z + dz)) || !isBlockPassable(BlockPos(src.x + dx, src.y + 1, src.z + dz))</ID>
+    <ID>LongMethod:CommandManager.kt:CommandManager$@ScriptApiRequired @JvmName("execute") fun execute</ID>
+    <ID>LongMethod:GraphSearch.kt:fun &lt;T> aStarBestEffort: BestEffortPath&lt;T>?</ID>
+    <ID>LongMethod:ModuleHud2.kt:ModuleHud2.EffectsHud$@Suppress("LongParameterList") private fun submitRowFill</ID>
+    <ID>LongMethod:ModuleHud2.kt:ModuleHud2.TargetHud$@Suppress("LongParameterList") private fun submitHead</ID>
+    <ID>LongMethod:ModuleHud2.kt:ModuleHud2.TargetHud$@Suppress("LongParameterList") private fun submitItems</ID>
+    <ID>LongMethod:ModuleKillAura.kt:ModuleKillAura$private fun findRotation: RotationWithVector?</ID>
+    <ID>LongMethod:PathCalculator.kt:PathCalculator$private fun buildNeighbors: Iterable&lt;WeightedEdge&lt;PathNode>></ID>
+    <ID>LongMethod:PathManager.kt:PathManager$private fun onPathReady</ID>
+    <ID>LongMethod:StochasticAngleSmooth.kt:StochasticAngleSmooth$override fun process: Rotation</ID>
+    <ID>LoopWithTooManyJumpStatements:ModuleAutoCrystal.kt:ModuleAutoCrystal$for</ID>
+    <ID>LoopWithTooManyJumpStatements:ModuleProjectilePuncher.kt:ModuleProjectilePuncher$for</ID>
+    <ID>LoopWithTooManyJumpStatements:TargetFinding.kt:for</ID>
+    <ID>MatchingDeclarationName:WatermarkRendering.kt:WatermarkGuiElement : GuiElementRenderState</ID>
+    <ID>MatchingDeclarationName:tasks.kt:CompareJsonKeysTask : DefaultTask</ID>
+    <ID>MaxLineLength:Earcut.kt:Earcut$if</ID>
+    <ID>MaxLineLength:HudFillMode.kt:HudFillMode.GRADIENT -> drawGradientFlowRoundedRect(x0, y0, x1, y1, radius, primary, secondary, periodMs = periodMs)</ID>
+    <ID>MaxLineLength:HudFillMode.kt:HudFillMode.RAINBOW -> drawChromaRoundedRect(x0, y0, x1, y1, radius, periodMs = periodMs, baseOffset = hueOffset)</ID>
+    <ID>MaxLineLength:HudFillMode.kt:HudFillMode.SWEEP -> drawChromaSweepRoundedRect(x0, y0, x1, y1, radius, periodMs = periodMs, baseOffset = hueOffset)</ID>
+    <ID>MaxLineLength:ModuleAutoCrystal.kt:ModuleAutoCrystal$*</ID>
+    <ID>MaxLineLength:ModuleBookBot.kt:ModuleBookBot.BookBuilder$*</ID>
+    <ID>MaxLineLength:ModuleHud2.kt:ModuleHud2.EffectsHud$val timeSample = String(CharArray(row.time.length) { i -> if (row.time[i].isDigit()) '0' else row.time[i] })</ID>
+    <ID>MaxLineLength:ModuleHud2.kt:ModuleHud2.HotbarHud$val outerFeather = buildContour(selX, 0f, selX + CELL, CELL, radius.coerceAtMost(CELL * 0.5f), feather)</ID>
+    <ID>MaxLineLength:ModuleHud2.kt:ModuleHud2.KeystrokesHud$cells += Cell("D", keyLabel(options.keyRight), options.keyRight.isDown, (KEY_SIZE + GAP) * 2f, layoutY, KEY_SIZE, KEY_SIZE)</ID>
+    <ID>MaxLineLength:ModuleHud2.kt:ModuleHud2.KeystrokesHud$cells += Cell("RMB", txtRmb, options.keyUse.isDown, mouseWidth + GAP, layoutY, mouseWidth, MOUSE_HEIGHT, rcps)</ID>
+    <ID>MaxLineLength:ModuleHud2.kt:ModuleHud2.KeystrokesHud$cells += Cell("S", keyLabel(options.keyDown), options.keyDown.isDown, KEY_SIZE + GAP, layoutY, KEY_SIZE, KEY_SIZE)</ID>
+    <ID>MaxLineLength:ModuleHud2.kt:ModuleHud2.KeystrokesHud$cells += Cell("W", keyLabel(options.keyUp), options.keyUp.isDown, KEY_SIZE + GAP, layoutY, KEY_SIZE, KEY_SIZE)</ID>
+    <ID>MaxLineLength:MovementDiagonal.kt:MovementDiagonal$return if (ctx.canSprint) MovementCost.DIAGONAL else MovementCost.DIAGONAL * (MovementCost.WALK / MovementCost.SPRINT)</ID>
+    <ID>MaxLineLength:Render2D.kt:addVertexWith2DPose(pose, x0, y0).setUv(0.0f, 0.0f).setColor(colorTL).setUv1(ew, eh).setUv2(er, 0).setLineWidth(0.0f)</ID>
+    <ID>MaxLineLength:Render2D.kt:addVertexWith2DPose(pose, x0, y1).setUv(0.0f, 1.0f).setColor(colorBL).setUv1(ew, eh).setUv2(er, 0).setLineWidth(0.0f)</ID>
+    <ID>MaxLineLength:Render2D.kt:addVertexWith2DPose(pose, x1, y0).setUv(1.0f, 0.0f).setColor(colorTR).setUv1(ew, eh).setUv2(er, 0).setLineWidth(0.0f)</ID>
+    <ID>MaxLineLength:Render2D.kt:addVertexWith2DPose(pose, x1, y1).setUv(1.0f, 1.0f).setColor(colorBR).setUv1(ew, eh).setUv2(er, 0).setLineWidth(0.0f)</ID>
+    <ID>MaxLineLength:Render2D.kt:addVertexWith2DPose(pose, xa, y0).setUv(f0, 0.0f).setColor(cl).setUv1(ew, eh).setUv2(er, 0).setLineWidth(0.0f)</ID>
+    <ID>MaxLineLength:Render2D.kt:addVertexWith2DPose(pose, xa, y1).setUv(f0, 1.0f).setColor(cl).setUv1(ew, eh).setUv2(er, 0).setLineWidth(0.0f)</ID>
+    <ID>MaxLineLength:Render2D.kt:addVertexWith2DPose(pose, xb, y0).setUv(f1, 0.0f).setColor(cr).setUv1(ew, eh).setUv2(er, 0).setLineWidth(0.0f)</ID>
+    <ID>MaxLineLength:Render2D.kt:addVertexWith2DPose(pose, xb, y1).setUv(f1, 1.0f).setColor(cr).setUv1(ew, eh).setUv2(er, 0).setLineWidth(0.0f)</ID>
+    <ID>MaxLineLength:TargetHudComponent.kt:TargetHudComponent$addVertexWith2DPose(pose, x + size, y + size).setUv(1f, 1f).setColor(-1).setUv1(sz, sz).setUv2(rr, 0).setLineWidth(0f)</ID>
+    <ID>MaxLineLength:TargetHudComponent.kt:TargetHudComponent$addVertexWith2DPose(pose, x + size, y).setUv(1f, 0f).setColor(-1).setUv1(sz, sz).setUv2(rr, 0).setLineWidth(0f)</ID>
+    <ID>MaxLineLength:TargetHudComponent.kt:TargetHudComponent$addVertexWith2DPose(pose, x, y + size).setUv(0f, 1f).setColor(-1).setUv1(sz, sz).setUv2(rr, 0).setLineWidth(0f)</ID>
+    <ID>MaxLineLength:TargetHudComponent.kt:fillQuad(x + skew, y, x, y + h, x + fw, y + h, x + fw + skew, y, s.primaryColor.argb, s.secondaryColor.argb)</ID>
+    <ID>MaxLineLength:TargetHudComponent.kt:if (fw > 0.5f) drawStyledFill(s.fill, x, y, x + fw, y + h, flatR, s.primaryColor, s.secondaryColor, s.periodMs)</ID>
+    <ID>MayBeConstant:PathManager.kt:PathManager$private val frontierReplanCooldownTicks = 20</ID>
+    <ID>MayBeConstant:PathManager.kt:PathManager$private val maxFailedReplans = 5</ID>
+    <ID>MayBeConstant:PathManager.kt:PathManager$private val maxFrontierWaits = 60</ID>
+    <ID>NestedBlockDepth:ModuleAutoCrystal.kt:ModuleAutoCrystal$private fun findBestObsidianPos: BlockPos?</ID>
+    <ID>NestedBlockDepth:ModuleAutoCrystal.kt:ModuleAutoCrystal$private fun findUnderminePos: BlockPos?</ID>
+    <ID>ReturnCount:Earcut.kt:Earcut$private fun intersects: Boolean</ID>
+    <ID>ReturnCount:ModuleAutoAppleFarm.kt:ModuleAutoAppleFarm$private fun findTarget: Boolean</ID>
+    <ID>ReturnCount:ModuleAutoCrystal.kt:ModuleAutoCrystal$private fun canPlaceCrystal: Boolean</ID>
+    <ID>ReturnCount:ModuleAutoCrystal.kt:ModuleAutoCrystal$private fun scorePlacement: Float?</ID>
+    <ID>ReturnCount:ModuleItemBind.kt:ModuleItemBind$private suspend fun execute</ID>
+    <ID>ReturnCount:PathSmoother.kt:PathSmoother$private fun isStraightWalkable: Boolean</ID>
+    <ID>ThrowsCount:CommandManager.kt:CommandManager$@ScriptApiRequired @JvmName("execute") fun execute</ID>
+    <ID>TooManyFunctions:Earcut.kt:Earcut</ID>
+    <ID>TooManyFunctions:HudFont.kt:HudFont</ID>
+    <ID>TooManyFunctions:HumanAngleSmooth.kt:HumanAngleSmooth : AngleSmooth</ID>
+    <ID>TooManyFunctions:ModuleAutoAppleFarm.kt:ModuleAutoAppleFarm : ClientModule</ID>
+    <ID>TooManyFunctions:ModuleHud2.kt:ModuleHud2 : ClientModule</ID>
+    <ID>TooManyFunctions:MovementHelper.kt:net.ccbluex.liquidbounce.utils.navigation.pathfinder.movement.MovementHelper.kt</ID>
+    <ID>TooManyFunctions:PathExecutor.kt:PathExecutor</ID>
+    <ID>TooManyFunctions:PathManager.kt:PathManager : EventListener</ID>
+    <ID>WildcardImport:PathCalculator.kt:import net.ccbluex.liquidbounce.utils.navigation.pathfinder.movement.*</ID>
+    <ID>WildcardImport:PathManager.kt:import kotlinx.coroutines.*</ID>
+  </CurrentIssues>
+</SmellBaseline>
