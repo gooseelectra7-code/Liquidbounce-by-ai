@@ -1,15 +1,15 @@
 [versions]
-# Minecraft 1.21.11 uses Java 25 (JDK 25 is the target)
+# Minecraft 26.1.2 uses Java 25 (JDK 25 is the target)
 jdk = "25"
 
 # Fabric Properties
 # Check these on https://fabricmc.net/versions.html
 # https://mods.upcraft.dev/dev/versions
-minecraft = "1.21.11"
+minecraft = "26.1.2"
 fabric-loom = "1.16.3"
 fabric-loader = "0.19.2"
 fabric-loaderMin = "0.18.4"
-fabric-api = "0.141.6+1.21.11"
+fabric-api = "0.149.1+26.1.2"
 
 # mc-authlib
 mc_authlib = "1.7.0"
@@ -27,10 +27,10 @@ ahocorasick = "0.6.3"
 fastutil4k = "0.2.8"
 
 # Recommended mods
-modmenu = "18.0.0-alpha.7"
+modmenu = "18.0.2"
 exploit_preventer_api = "1.0.0"
-exploit_preventer_mod = "1.0.6+1.21.11"
-sodium = "mc1.21.11-0.8.12-fabric"
+exploit_preventer_mod = "1.0.6+26.1"
+sodium = "mc26.1.2-0.8.12-beta.4-fabric"
 viafabricplus = "4.5.3"
 
 # Kotlin
