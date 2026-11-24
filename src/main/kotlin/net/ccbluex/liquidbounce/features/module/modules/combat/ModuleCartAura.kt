@@ -74,5 +74,8 @@ object ModuleCartAura : ClientModule("CartAura", ModuleCategories.COMBAT) {
         lastStartMs = now
 
         AutoCartFire.startAt(victim.position())
+
+        // Nothing else drives the chain — drive it here so the pop that started it acts this tick.
+        AutoCartFire.tick()
     }
 }

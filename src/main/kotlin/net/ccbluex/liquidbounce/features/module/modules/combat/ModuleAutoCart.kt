@@ -394,11 +394,12 @@ object ModuleAutoCart : ClientModule("AutoCart", ModuleCategories.COMBAT) {
     }
 
     /**
-     * Fire mode: [AutoCartFire] runs its chain on the module tick while Mode = FIRE.
+     * Fire/Bind modes: [AutoCartFire] runs its chain on the module tick.
+     * In BIND mode the chain is also started by the bind press; it advances here like in FIRE.
      */
     @Suppress("unused")
     private val fireHandler = tickHandler {
-        if (mode == CartMode.FIRE) {
+        if (mode == CartMode.FIRE || mode == CartMode.BIND) {
             AutoCartFire.tick()
         }
     }
