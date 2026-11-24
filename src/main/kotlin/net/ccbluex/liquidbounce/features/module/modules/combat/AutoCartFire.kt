@@ -130,7 +130,11 @@ internal object AutoCartFire {
             stepTicks = 0
             return
         }
-        if (wireHitOn(railPos) == null) return
+        if (wireHitOn(railPos) == null) {
+            // Nothing aims at the rail in this chain — settle the aim here, then click on settle.
+            aimAt(Vec3(railPos.x + 0.5, railPos.y + RAIL_SURFACE, railPos.z + 0.5))
+            return
+        }
         if (!inReach(railPos)) return reset()
 
         val slot = findHotbarItem { it.`is`(Items.RAIL) || it.`is`(Items.POWERED_RAIL) } ?: return reset()
@@ -146,7 +150,10 @@ internal object AutoCartFire {
 
         if (findCart(railPos) == null) {
             // The cart spawns with the placement; do the click once, then wait it out.
-            if (wireHitOn(railPos) == null) return
+            if (wireHitOn(railPos) == null) {
+                aimAt(Vec3(railPos.x + 0.5, railPos.y + RAIL_SURFACE, railPos.z + 0.5))
+                return
+            }
             if (!inReach(railPos)) return reset()
             val slot = findHotbarItem { it.`is`(Items.TNT_MINECART) } ?: return reset()
             swapTo(slot)
@@ -168,7 +175,10 @@ internal object AutoCartFire {
             stepTicks = 0
             return
         }
-        if (wireHitOn(firePos) == null) return
+        if (wireHitOn(firePos) == null) {
+            aimAt(fireHit(firePos))
+            return
+        }
         if (!inReach(firePos)) return reset()
 
         val slot = findHotbarItem { it.`is`(Items.FLINT_AND_STEEL) } ?: return reset()
@@ -191,7 +201,10 @@ internal object AutoCartFire {
             aimAt(Vec3(railPos.x + 0.5, railPos.y + RAIL_SURFACE, railPos.z + 0.5))
             return
         }
-        if (wireHitOn(railPos) == null) return
+        if (wireHitOn(railPos) == null) {
+            aimAt(Vec3(railPos.x + 0.5, railPos.y + RAIL_SURFACE, railPos.z + 0.5))
+            return
+        }
         if (!inReach(railPos)) return reset()
 
         val slot = findHotbarItem { it.item is CrossbowItem && CrossbowItem.isCharged(it) }
@@ -253,8 +266,7 @@ internal object AutoCartFire {
         if (findCart(railPos) != null) return false
 
         val firePos = railPos.relative(Direction.getApproximateNearest(player.x - railPos.x, 0.0, player.z - railPos.z))
-        if (world.getBlockState(firePos).isAir) return false
-
+        // An air cell just means we'll skip the flint & steel step in stepFire — not a non-viable spot.
         return shotLineValidViable(railPos, firePos)
     }
 
