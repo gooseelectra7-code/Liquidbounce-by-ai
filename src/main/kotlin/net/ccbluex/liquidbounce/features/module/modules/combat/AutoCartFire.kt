@@ -176,7 +176,7 @@ internal object AutoCartFire {
             return
         }
         if (wireHitOn(firePos) == null) {
-            aimAt(fireHit(firePos))
+            aimAt(fireHit(firePos).location)
             return
         }
         if (!inReach(firePos)) return reset()
